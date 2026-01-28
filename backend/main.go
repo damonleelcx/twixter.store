@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"backend/repository"
 	"backend/service"
 
+	"github.com/getsentry/sentry-go"
+	sentrygin "github.com/getsentry/sentry-go/gin"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
@@ -175,6 +178,29 @@ func main() {
 	// 加载 .env 文件
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: .env file not found, using default values or environment variables")
+	}
+
+	// 初始化 Sentry
+	sentryDSN := getEnv("SENTRY_DSN", "")
+	if sentryDSN != "" {
+		if err := sentry.Init(sentry.ClientOptions{
+			Dsn: sentryDSN,
+			BeforeSend: func(event *sentry.Event, hint *sentry.EventHint) *sentry.Event {
+				if hint.Context != nil {
+					if req, ok := hint.Context.Value(sentry.RequestContextKey).(*http.Request); ok {
+						// 可以在这里访问原始请求
+						_ = req
+					}
+				}
+				return event
+			},
+		}); err != nil {
+			log.Printf("Sentry initialization failed: %v\n", err)
+		} else {
+			log.Println("Sentry initialized successfully")
+		}
+	} else {
+		log.Println("Warning: SENTRY_DSN not set, Sentry monitoring disabled")
 	}
 
 	// 初始化数据库连接
@@ -455,9 +481,17 @@ func main() {
 
 	router := gin.Default()
 
-	// 全局中间件：Sentry 错误监控和恢复
-	router.Use(middleware.SentryMiddleware())
-	router.Use(middleware.SentryRecoveryMiddleware())
+	// 全局中间件：Sentry 错误监控和恢复（使用官方 Gin SDK）
+	if sentryDSN != "" {
+		router.Use(sentrygin.New(sentrygin.Options{
+			Repanic:         true,
+			WaitForDelivery: false,
+			Timeout:         2 * time.Second,
+		}))
+	}
+
+	// 自定义中间件：设置用户信息到 Sentry（在 sentrygin 之后）
+	router.Use(middleware.SentryUserMiddleware())
 
 	// 健康检查端点（使用默认限流）
 	router.GET("/ping", middleware.RateLimitMiddleware(middleware.DefaultRateLimiter), func(c *gin.Context) {
