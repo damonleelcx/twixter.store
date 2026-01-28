@@ -18,8 +18,8 @@ spec:
     spec:
       containers:
         - name: backend
-          # Minikube 本地构建：先 eval $(minikube docker-env)，在 backend 目录 docker build -t twixter-backend:latest .
-          image: twixter-backend:latest
+          # Docker Hub: damonleelcx/twixter.store-backend ；或本地构建后使用该名称
+          image: damonleelcx/twixter.store-backend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
