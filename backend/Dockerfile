@@ -19,11 +19,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 # 运行阶段
 FROM alpine:latest
 
-# 安装 ca-certificates 用于 HTTPS 请求
-RUN apk --no-cache add ca-certificates tzdata
+# 安装 ca-certificates、FFmpeg（视频处理）
+RUN apk --no-cache add ca-certificates tzdata ffmpeg
 
 # 设置时区
-ENV TZ=Asia/Shanghai
+ENV TZ=America/New_York
 
 WORKDIR /root/
 

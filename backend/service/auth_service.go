@@ -17,7 +17,7 @@ import (
 // AuthService Authentication service interface
 type AuthService interface {
 	// Registration and login
-	Register(email, password, ipAddress string) (*entity.UserBase, *entity.Session, error)
+	Register(email, password, ipAddress, username, referralCode string, accountType entity.AccountType) (*entity.UserBase, *entity.Session, error)
 	Login(email, password, ipAddress, userAgent, deviceInfo string) (*entity.UserBase, *entity.Session, error)
 	Logout(sessionID uint) error
 	LogoutAll(userID uint) error
@@ -39,17 +39,25 @@ type AuthService interface {
 
 // authService Authentication service implementation
 type authService struct {
-	userRepo    repository.UserRepository
-	sessionRepo repository.SessionRepository
-	db          *gorm.DB
+	userRepo           repository.UserRepository
+	sessionRepo        repository.SessionRepository
+	walletRepo         repository.WalletRepository
+	purchaseRepo       repository.PurchaseRepository
+	userPermissionRepo repository.UserPermissionRepository
+	permissionRepo     repository.PermissionRepository
+	db                 *gorm.DB
 }
 
 // NewAuthService Create authentication service instance
-func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, sessionRepo repository.SessionRepository) AuthService {
+func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, sessionRepo repository.SessionRepository, walletRepo repository.WalletRepository, purchaseRepo repository.PurchaseRepository, userPermissionRepo repository.UserPermissionRepository, permissionRepo repository.PermissionRepository) AuthService {
 	return &authService{
-		userRepo:    userRepo,
-		sessionRepo: sessionRepo,
-		db:          db,
+		userRepo:           userRepo,
+		sessionRepo:        sessionRepo,
+		walletRepo:         walletRepo,
+		purchaseRepo:       purchaseRepo,
+		userPermissionRepo: userPermissionRepo,
+		permissionRepo:     permissionRepo,
+		db:                 db,
 	}
 }
 
@@ -65,6 +73,10 @@ const (
 
 	// Password reset token expiration duration
 	PasswordResetTokenDuration = 1 * time.Hour
+
+	// Referral configuration
+	ReferralRewardCredits = 100 // 推荐奖励积分数量
+	ReferralCodeLength    = 8   // 推荐码长度
 )
 
 // hashPassword Hash password
@@ -91,6 +103,33 @@ func generateToken(length int) (string, error) {
 	return base64.URLEncoding.EncodeToString(bytes), nil
 }
 
+// generateReferralCode Generate unique referral code
+func (s *authService) generateReferralCode() (string, error) {
+	maxAttempts := 10
+	for i := 0; i < maxAttempts; i++ {
+		// 生成一个简短的推荐码（使用大写字母和数字）
+		const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		bytes := make([]byte, ReferralCodeLength)
+		if _, err := rand.Read(bytes); err != nil {
+			return "", fmt.Errorf("failed to generate referral code: %w", err)
+		}
+		for i := range bytes {
+			bytes[i] = charset[bytes[i]%byte(len(charset))]
+		}
+		code := string(bytes)
+
+		// 检查推荐码是否已存在
+		_, err := s.userRepo.GetByReferralCode(code)
+		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
+			return code, nil // 推荐码不存在，可以使用
+		} else if err != nil {
+			return "", fmt.Errorf("failed to check referral code: %w", err)
+		}
+		// 如果推荐码已存在，继续尝试生成新的
+	}
+	return "", fmt.Errorf("failed to generate unique referral code after %d attempts", maxAttempts)
+}
+
 // getJWTSecret Get JWT secret (if using JWT, can be obtained from environment variables)
 func getJWTSecret() string {
 	secret := os.Getenv("JWT_SECRET")
@@ -101,7 +140,7 @@ func getJWTSecret() string {
 }
 
 // Register User registration
-func (s *authService) Register(email, password, ipAddress string) (*entity.UserBase, *entity.Session, error) {
+func (s *authService) Register(email, password, ipAddress, username, referralCode string, accountType entity.AccountType) (*entity.UserBase, *entity.Session, error) {
 	// Check if email already exists
 	existingUser, err := s.userRepo.GetByEmailFromShard(email)
 	if err == nil && existingUser != nil {
@@ -111,18 +150,57 @@ func (s *authService) Register(email, password, ipAddress string) (*entity.UserB
 		return nil, nil, fmt.Errorf("failed to query user: %w", err)
 	}
 
+	// Check if username already exists (if provided)
+	if username != "" {
+		// Search for existing username in both shards
+		var existingUser0 entity.UserShard0
+		var existingUser1 entity.UserShard1
+		if err := s.db.Where("username = ?", username).First(&existingUser0).Error; err == nil {
+			return nil, nil, errors.New("username already taken")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, fmt.Errorf("failed to check username: %w", err)
+		}
+		if err := s.db.Where("username = ?", username).First(&existingUser1).Error; err == nil {
+			return nil, nil, errors.New("username already taken")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, fmt.Errorf("failed to check username: %w", err)
+		}
+	}
+
 	// Hash password
 	hashedPassword, err := hashPassword(password)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// Generate referral code for new user
+	newReferralCode, err := s.generateReferralCode()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate referral code: %w", err)
+	}
+
+	// Validate referral code if provided
+	var referredBy *uint
+	if referralCode != "" {
+		referrer, err := s.userRepo.GetByReferralCode(referralCode)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil, errors.New("invalid referral code")
+			}
+			return nil, nil, fmt.Errorf("failed to validate referral code: %w", err)
+		}
+		referredBy = &referrer.ID
+	}
+
 	// Create user
 	user := &entity.UserBase{
-		Email:       email,
-		Password:    hashedPassword,
-		AccountType: entity.AccountTypeLight,
-		IPAddress:   ipAddress,
+		Email:        email,
+		Username:     username, // Username from request (can be empty)
+		Password:     hashedPassword,
+		AccountType:  accountType, // 根据注册来源设置账户类型
+		IPAddress:    ipAddress,
+		ReferralCode: newReferralCode,
+		ReferredBy:   referredBy,
 	}
 
 	// Create user and session using transaction
@@ -140,19 +218,81 @@ func (s *authService) Register(email, password, ipAddress string) (*entity.UserB
 
 		// Copy user to shard table
 		createdUser = &entity.UserBase{
-			ID:          userEntity.ID,
-			Email:       userEntity.Email,
-			Password:    userEntity.Password,
-			AccountType: userEntity.AccountType,
-			IPAddress:   userEntity.IPAddress,
-			CreatedAt:   userEntity.CreatedAt,
-			UpdatedAt:   userEntity.UpdatedAt,
+			ID:           userEntity.ID,
+			Email:        userEntity.Email,
+			Username:     userEntity.Username,
+			Password:     userEntity.Password,
+			AccountType:  userEntity.AccountType,
+			IPAddress:    userEntity.IPAddress,
+			ReferralCode: userEntity.ReferralCode,
+			ReferredBy:   userEntity.ReferredBy,
+			CreatedAt:    userEntity.CreatedAt,
+			UpdatedAt:    userEntity.UpdatedAt,
 		}
 
 		// Create sharded user
 		if err := s.userRepo.CreateInShard(userEntity.ID, createdUser); err != nil {
 			return err
 		}
+
+		// Create wallet for new user
+		wallet := &entity.Wallet{
+			UserID:      userEntity.ID,
+			Balance:     0,
+			TotalEarned: 0,
+			TotalSpent:  0,
+		}
+		if err := tx.Create(wallet).Error; err != nil {
+			return fmt.Errorf("failed to create wallet: %w", err)
+		}
+
+		// If user was referred, give referral reward to referrer
+		if referredBy != nil {
+			// Add credits to referrer's wallet
+			if err := s.walletRepo.AddCredits(*referredBy, ReferralRewardCredits); err != nil {
+				return fmt.Errorf("failed to add referral reward: %w", err)
+			}
+
+			// Create purchase record for referral reward
+			referrerPurchase := &entity.PurchaseBase{
+				UserID:       *referredBy,
+				PurchaseType: entity.PurchaseTypeReferralReward,
+				Status:       entity.PurchaseStatusCompleted,
+				Credits:      ReferralRewardCredits,
+				Notes:        fmt.Sprintf("Referral reward for user %d", userEntity.ID),
+			}
+			if err := s.purchaseRepo.CreateInShard(*referredBy, referrerPurchase); err != nil {
+				return fmt.Errorf("failed to create referral purchase record: %w", err)
+			}
+		}
+
+		// Grant permissions based on account type
+		if accountType == entity.AccountTypeDark {
+			// Dark account: grant can_view_nsfw permission
+			var permission entity.Permission
+			if err := tx.Where("name = ?", "can_view_nsfw").First(&permission).Error; err != nil {
+				return fmt.Errorf("failed to get can_view_nsfw permission: %w", err)
+			}
+			// Check if permission already exists
+			var existingUserPermission entity.UserPermission
+			err := tx.Where("user_id = ? AND permission_id = ?", userEntity.ID, permission.ID).
+				First(&existingUserPermission).Error
+			if err != nil && err != gorm.ErrRecordNotFound {
+				return fmt.Errorf("failed to check existing permission: %w", err)
+			}
+			if err == gorm.ErrRecordNotFound {
+				// Create new permission (ShardNumber will be set automatically by BeforeCreate hook)
+				userPermission := &entity.UserPermission{
+					UserID:       userEntity.ID,
+					PermissionID: permission.ID,
+					ShardNumber:  entity.GetShardNumber(userEntity.ID),
+				}
+				if err := tx.Create(userPermission).Error; err != nil {
+					return fmt.Errorf("failed to grant can_view_nsfw permission: %w", err)
+				}
+			}
+		}
+		// Light account: no additional permissions needed
 
 		// Generate tokens
 		accessToken, err := generateToken(32)
@@ -242,6 +382,23 @@ func (s *authService) Login(email, password, ipAddress, userAgent, deviceInfo st
 
 	if err := s.userRepo.UpdateInShard(user.ID, user); err != nil {
 		return nil, nil, fmt.Errorf("failed to update user info: %w", err)
+	}
+
+	// If user is admin, ensure they have all necessary permissions
+	if user.AccountType == entity.AccountTypeAdmin {
+		adminPermissions := []string{"can_view_nsfw", "can_view_analytics", "can_upload_content"}
+		for _, permName := range adminPermissions {
+			permission, err := s.permissionRepo.GetByName(permName)
+			if err != nil {
+				// Permission might not exist yet, skip it
+				continue
+			}
+			// Grant permission if not already granted (GrantPermission handles duplicates)
+			if err := s.userPermissionRepo.GrantPermission(user.ID, permission.ID); err != nil {
+				// Log error but don't fail login
+				fmt.Printf("Warning: failed to grant permission %s to admin user %d: %v\n", permName, user.ID, err)
+			}
+		}
 	}
 
 	// Generate tokens

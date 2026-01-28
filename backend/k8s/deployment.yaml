@@ -1,0 +1,55 @@
+# Backend 部署，从 Secret/ConfigMap 注入环境变量（含托管 Postgres 凭证）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: twixter-backend
+  namespace: default
+  labels:
+    app: twixter-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: twixter-backend
+  template:
+    metadata:
+      labels:
+        app: twixter-backend
+    spec:
+      containers:
+        - name: backend
+          # Minikube 本地构建：先 eval $(minikube docker-env)，在 backend 目录 docker build -t twixter-backend:latest .
+          image: twixter-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - secretRef:
+                name: twixter-backend-secret
+            - configMapRef:
+                name: twixter-backend-config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      restartPolicy: Always

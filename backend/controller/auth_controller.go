@@ -22,8 +22,11 @@ func NewAuthController(authService service.AuthService) *AuthController {
 
 // RegisterRequest Registration request
 type RegisterRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
+	Email        string `json:"email" binding:"required,email"`
+	Password     string `json:"password" binding:"required,min=8"`
+	Username     string `json:"username,omitempty"`                                          // 用户名（可选）
+	ReferralCode string `json:"referral_code,omitempty"`                                     // 推荐码（可选）
+	Viewing      string `json:"viewing" binding:"required,oneof=viewing_light viewing_dark"` // 查看类型：viewing_light 或 viewing_dark
 }
 
 // LoginRequest Login request
@@ -69,14 +72,23 @@ func (ac *AuthController) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"error":   "Invalid request data",
 			"details": err.Error(),
 		})
 		return
 	}
 
 	ipAddress := c.ClientIP()
-	user, session, err := ac.authService.Register(req.Email, req.Password, ipAddress)
+
+	// 根据 viewing 参数确定账户类型
+	var accountType entity.AccountType
+	if req.Viewing == "viewing_dark" {
+		accountType = entity.AccountTypeDark
+	} else {
+		accountType = entity.AccountTypeLight
+	}
+
+	user, session, err := ac.authService.Register(req.Email, req.Password, ipAddress, req.Username, req.ReferralCode, accountType)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		if err.Error() == "email already registered" {
@@ -91,15 +103,17 @@ func (ac *AuthController) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "User registered successfully",
 		"user": gin.H{
-			"id":           user.ID,
-			"email":        user.Email,
-			"account_type": user.AccountType,
+			"id":            user.ID,
+			"email":         user.Email,
+			"username":      user.Username,
+			"account_type":  user.AccountType,
+			"referral_code": user.ReferralCode,
 		},
 		"session": gin.H{
-			"access_token":           session.AccessToken,
-			"refresh_token":          session.RefreshToken,
-			"token_type":             session.TokenType,
-			"access_token_expires_at": session.AccessTokenExpiresAt,
+			"access_token":             session.AccessToken,
+			"refresh_token":            session.RefreshToken,
+			"token_type":               session.TokenType,
+			"access_token_expires_at":  session.AccessTokenExpiresAt,
 			"refresh_token_expires_at": session.RefreshTokenExpiresAt,
 		},
 	})
@@ -121,7 +135,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"error":   "Invalid request data",
 			"details": err.Error(),
 		})
 		return
@@ -146,14 +160,16 @@ func (ac *AuthController) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Login successful",
 		"user": gin.H{
-			"id":           user.ID,
-			"email":        user.Email,
-			"account_type": user.AccountType,
+			"id":            user.ID,
+			"email":         user.Email,
+			"username":      user.Username,
+			"account_type":  user.AccountType,
+			"referral_code": user.ReferralCode,
 		},
 		"session": gin.H{
-			"access_token":            session.AccessToken,
-			"refresh_token":           session.RefreshToken,
-			"token_type":              session.TokenType,
+			"access_token":             session.AccessToken,
+			"refresh_token":            session.RefreshToken,
+			"token_type":               session.TokenType,
 			"access_token_expires_at":  session.AccessTokenExpiresAt,
 			"refresh_token_expires_at": session.RefreshTokenExpiresAt,
 		},
@@ -237,7 +253,7 @@ func (ac *AuthController) RefreshToken(c *gin.Context) {
 	var req RefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"error":   "Invalid request data",
 			"details": err.Error(),
 		})
 		return
@@ -255,10 +271,10 @@ func (ac *AuthController) RefreshToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Token refreshed successfully",
 		"session": gin.H{
-			"access_token":            session.AccessToken,
-			"refresh_token":           session.RefreshToken,
-			"token_type":              session.TokenType,
-			"access_token_expires_at": session.AccessTokenExpiresAt,
+			"access_token":             session.AccessToken,
+			"refresh_token":            session.RefreshToken,
+			"token_type":               session.TokenType,
+			"access_token_expires_at":  session.AccessTokenExpiresAt,
 			"refresh_token_expires_at": session.RefreshTokenExpiresAt,
 		},
 	})
@@ -278,7 +294,7 @@ func (ac *AuthController) RequestPasswordReset(c *gin.Context) {
 	var req RequestPasswordResetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"error":   "Invalid request data",
 			"details": err.Error(),
 		})
 		return
@@ -312,7 +328,7 @@ func (ac *AuthController) ResetPassword(c *gin.Context) {
 	var req ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"error":   "Invalid request data",
 			"details": err.Error(),
 		})
 		return
@@ -350,7 +366,7 @@ func (ac *AuthController) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+			"error":   "Invalid request data",
 			"details": err.Error(),
 		})
 		return
@@ -404,8 +420,10 @@ func (ac *AuthController) GetCurrentUser(c *gin.Context) {
 		"user": gin.H{
 			"id":             userBase.ID,
 			"email":          userBase.Email,
+			"username":       userBase.Username,
 			"account_type":   userBase.AccountType,
 			"email_verified": userBase.EmailVerified,
+			"referral_code":  userBase.ReferralCode,
 			"created_at":     userBase.CreatedAt,
 		},
 	})

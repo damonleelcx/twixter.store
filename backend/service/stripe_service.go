@@ -1,0 +1,257 @@
+package service
+
+import (
+	"backend/entity"
+	"encoding/json"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/stripe/stripe-go/v84"
+	"github.com/stripe/stripe-go/v84/checkout/session"
+)
+
+// StripeService Stripe 支付服务接口
+type StripeService interface {
+	// CreateMembershipCheckoutSession 创建会员购买结账会话
+	CreateMembershipCheckoutSession(userID uint, months int) (*stripe.CheckoutSession, error)
+
+	// CreateCreditsCheckoutSession 创建积分购买结账会话
+	CreateCreditsCheckoutSession(userID uint, amount float64, credits int64) (*stripe.CheckoutSession, error)
+
+	// HandleWebhook 处理 Stripe webhook 事件
+	HandleWebhook(event *stripe.Event) error
+}
+
+// stripeService Stripe 服务实现
+type stripeService struct {
+	webhookSecret string
+}
+
+// NewStripeService 创建 Stripe 服务实例
+func NewStripeService() (StripeService, error) {
+	// 从环境变量获取 Stripe API Key
+	stripeKey := os.Getenv("STRIPE_SECRET_KEY")
+	if stripeKey == "" {
+		return nil, fmt.Errorf("STRIPE_SECRET_KEY environment variable is not set")
+	}
+
+	// 设置 Stripe API Key
+	stripe.Key = stripeKey
+
+	// 从环境变量获取 Webhook Secret（可选）
+	webhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+
+	return &stripeService{
+		webhookSecret: webhookSecret,
+	}, nil
+}
+
+// CreateMembershipCheckoutSession 创建会员购买结账会话
+func (s *stripeService) CreateMembershipCheckoutSession(userID uint, months int) (*stripe.CheckoutSession, error) {
+	// 验证月份数
+	if months != 1 && months != 3 && months != 9 {
+		return nil, fmt.Errorf("invalid months: must be 1, 3, or 9")
+	}
+
+	// 计算价格（$6.99/月）
+	monthlyPrice := 6.99
+	totalAmount := monthlyPrice * float64(months)
+
+	// 获取前端 URL（用于返回和取消）
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+
+	// 创建 Checkout Session
+	params := &stripe.CheckoutSessionParams{
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency: stripe.String(string(stripe.CurrencyUSD)),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name:        stripe.String(fmt.Sprintf("Membership - %d month(s)", months)),
+						Description: stripe.String(fmt.Sprintf("Premium membership for %d month(s) at $%.2f/month", months, monthlyPrice)),
+					},
+					UnitAmount: stripe.Int64(int64(totalAmount * 100)), // Stripe 使用分为单位
+				},
+				Quantity: stripe.Int64(1),
+			},
+		},
+		Mode:      stripe.String(string(stripe.CheckoutSessionModePayment)),
+		UIMode:    stripe.String("custom"),
+		ReturnURL: stripe.String(fmt.Sprintf("%s/purchase/return?session_id={CHECKOUT_SESSION_ID}", frontendURL)),
+		Metadata: map[string]string{
+			"user_id":         fmt.Sprintf("%d", userID),
+			"purchase_type":   "membership",
+			"months":          fmt.Sprintf("%d", months),
+			"membership_type": fmt.Sprintf("%d_months", months),
+		},
+	}
+
+	result, err := session.New(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create checkout session: %w", err)
+	}
+
+	return result, nil
+}
+
+// CreateCreditsCheckoutSession 创建积分购买结账会话
+func (s *stripeService) CreateCreditsCheckoutSession(userID uint, amount float64, credits int64) (*stripe.CheckoutSession, error) {
+	if amount <= 0 {
+		return nil, fmt.Errorf("amount must be greater than 0")
+	}
+	if credits <= 0 {
+		return nil, fmt.Errorf("credits must be greater than 0")
+	}
+
+	// 获取前端 URL（用于返回和取消）
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+
+	// 创建 Checkout Session
+	params := &stripe.CheckoutSessionParams{
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency: stripe.String(string(stripe.CurrencyUSD)),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name:        stripe.String(fmt.Sprintf("Credits - %d credits", credits)),
+						Description: stripe.String(fmt.Sprintf("Purchase %d credits for $%.2f", credits, amount)),
+					},
+					UnitAmount: stripe.Int64(int64(amount * 100)), // Stripe 使用分为单位
+				},
+				Quantity: stripe.Int64(1),
+			},
+		},
+		Mode:      stripe.String(string(stripe.CheckoutSessionModePayment)),
+		UIMode:    stripe.String("custom"),
+		ReturnURL: stripe.String(fmt.Sprintf("%s/purchase/return?session_id={CHECKOUT_SESSION_ID}", frontendURL)),
+		Metadata: map[string]string{
+			"user_id":       fmt.Sprintf("%d", userID),
+			"purchase_type": "credits",
+			"credits":       fmt.Sprintf("%d", credits),
+		},
+	}
+
+	result, err := session.New(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create checkout session: %w", err)
+	}
+
+	return result, nil
+}
+
+// HandleWebhook 处理 Stripe webhook 事件
+func (s *stripeService) HandleWebhook(event *stripe.Event) error {
+	// 这里只是返回事件，实际处理逻辑在购买服务中
+	// 因为需要访问数据库和仓库
+	return nil
+}
+
+// ParseCheckoutSessionMetadata 解析 Checkout Session 的元数据
+func ParseCheckoutSessionMetadata(session *stripe.CheckoutSession) (map[string]string, error) {
+	if session.Metadata == nil {
+		return nil, fmt.Errorf("session metadata is nil")
+	}
+	return session.Metadata, nil
+}
+
+// GetPurchaseTypeFromMetadata 从元数据中获取购买类型
+func GetPurchaseTypeFromMetadata(metadata map[string]string) (entity.PurchaseType, error) {
+	purchaseTypeStr, ok := metadata["purchase_type"]
+	if !ok {
+		return "", fmt.Errorf("purchase_type not found in metadata")
+	}
+
+	switch purchaseTypeStr {
+	case "membership":
+		return entity.PurchaseTypeMembership, nil
+	case "credits":
+		return entity.PurchaseTypeCredits, nil
+	default:
+		return "", fmt.Errorf("unknown purchase_type: %s", purchaseTypeStr)
+	}
+}
+
+// GetUserIDFromMetadata 从元数据中获取用户ID
+func GetUserIDFromMetadata(metadata map[string]string) (uint, error) {
+	userIDStr, ok := metadata["user_id"]
+	if !ok {
+		return 0, fmt.Errorf("user_id not found in metadata")
+	}
+
+	var userID uint
+	if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err != nil {
+		return 0, fmt.Errorf("invalid user_id format: %w", err)
+	}
+
+	return userID, nil
+}
+
+// GetCreditsFromMetadata 从元数据中获取积分数量
+func GetCreditsFromMetadata(metadata map[string]string) (int64, error) {
+	creditsStr, ok := metadata["credits"]
+	if !ok {
+		return 0, fmt.Errorf("credits not found in metadata")
+	}
+
+	var credits int64
+	if _, err := fmt.Sscanf(creditsStr, "%d", &credits); err != nil {
+		return 0, fmt.Errorf("invalid credits format: %w", err)
+	}
+
+	return credits, nil
+}
+
+// GetMembershipMonthsFromMetadata 从元数据中获取会员月数
+func GetMembershipMonthsFromMetadata(metadata map[string]string) (int, error) {
+	monthsStr, ok := metadata["months"]
+	if !ok {
+		return 0, fmt.Errorf("months not found in metadata")
+	}
+
+	var months int
+	if _, err := fmt.Sscanf(monthsStr, "%d", &months); err != nil {
+		return 0, fmt.Errorf("invalid months format: %w", err)
+	}
+
+	return months, nil
+}
+
+// GetMembershipTypeFromMetadata 从元数据中获取会员类型
+func GetMembershipTypeFromMetadata(metadata map[string]string) (string, error) {
+	membershipType, ok := metadata["membership_type"]
+	if !ok {
+		return "", fmt.Errorf("membership_type not found in metadata")
+	}
+	return membershipType, nil
+}
+
+// CalculateMembershipExpiry 计算会员到期时间
+func CalculateMembershipExpiry(months int) time.Time {
+	return time.Now().AddDate(0, months, 0)
+}
+
+// ConvertStripeAmountToFloat 将 Stripe 金额（分）转换为浮点数（美元）
+func ConvertStripeAmountToFloat(amount int64) float64 {
+	return float64(amount) / 100.0
+}
+
+// ConvertFloatToStripeAmount 将浮点数（美元）转换为 Stripe 金额（分）
+func ConvertFloatToStripeAmount(amount float64) int64 {
+	return int64(amount * 100)
+}
+
+// SerializeStripeEvent 序列化 Stripe 事件为 JSON
+func SerializeStripeEvent(event *stripe.Event) (string, error) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal event: %w", err)
+	}
+	return string(data), nil
+}

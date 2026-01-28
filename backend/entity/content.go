@@ -14,6 +14,14 @@ const (
 	ContentTypeImage ContentType = "image" // 图片
 )
 
+// ContentCategory 内容分类枚举
+type ContentCategory string
+
+const (
+	ContentCategoryLight ContentCategory = "light" // 普通内容
+	ContentCategoryDark  ContentCategory = "dark"  // NSFW 内容（需要 can_view_nsfw 权限）
+)
+
 // ContentStatus 内容状态枚举
 type ContentStatus string
 
@@ -47,10 +55,11 @@ type Content struct {
 	Duration *float64 `gorm:"default:0" json:"duration"` // 时长（秒，主要用于视频）
 
 	// 元数据
-	Category  string `gorm:"size:100;index" json:"category"`       // 分类
-	IsPublic  bool   `gorm:"default:false;index" json:"is_public"` // 是否公开
-	ViewCount int64  `gorm:"default:0" json:"view_count"`          // 查看次数
-	LikeCount int64  `gorm:"default:0" json:"like_count"`          // 点赞次数
+	Category  ContentCategory `gorm:"type:varchar(20);not null;default:'light';index" json:"category"` // 分类：light（普通）或 dark（NSFW，需要权限）
+	IsPublic  bool            `gorm:"default:false;index" json:"is_public"`                            // 是否公开
+	ViewCount int64           `gorm:"default:0" json:"view_count"`                                     // 查看次数
+	LikeCount int64           `gorm:"default:0" json:"like_count"`                                     // 点赞次数
+	Price     float64         `gorm:"type:decimal(10,2);default:0;index" json:"price"`                 // 价格（美元，用于单个视频销售）
 
 	// 处理相关
 	ProcessingError string     `gorm:"type:text" json:"processing_error"`  // 处理错误信息
@@ -103,4 +112,14 @@ func (c *Content) IsProcessing() bool {
 // IsFailed 检查内容处理是否失败
 func (c *Content) IsFailed() bool {
 	return c.Status == ContentStatusFailed
+}
+
+// IsDark 检查内容是否为 dark 分类
+func (c *Content) IsDark() bool {
+	return c.Category == ContentCategoryDark
+}
+
+// IsLight 检查内容是否为 light 分类
+func (c *Content) IsLight() bool {
+	return c.Category == ContentCategoryLight
 }

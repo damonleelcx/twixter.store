@@ -20,9 +20,14 @@ const (
 type UserBase struct {
 	ID          uint        `gorm:"primaryKey" json:"id"`
 	Email       string      `gorm:"uniqueIndex;not null;size:255" json:"email"`
-	Password    string      `gorm:"not null;size:255" json:"-"` // 不序列化密码字段
+	Username    string      `gorm:"uniqueIndex;size:100" json:"username"` // 用户名（可选，可为空）
+	Password    string      `gorm:"not null;size:255" json:"-"`           // 不序列化密码字段
 	AccountType AccountType `gorm:"type:varchar(20);not null;default:'light'" json:"account_type"`
 	IPAddress   string      `gorm:"size:45" json:"ip_address"` // IPv6 最大长度为 45
+
+	// 推荐相关字段
+	ReferralCode string `gorm:"uniqueIndex;size:20;index" json:"referral_code"` // 用户的推荐码（唯一）
+	ReferredBy   *uint  `gorm:"index" json:"referred_by,omitempty"`             // 推荐人ID（可为空）
 
 	// 时间戳
 	CreatedAt time.Time      `json:"created_at"`

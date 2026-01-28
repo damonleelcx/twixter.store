@@ -1,0 +1,29 @@
+# Binary
+*.exe
+backend
+/bin/
+
+# Env (secrets)
+.env
+.env.local
+.env.*.local
+
+# Go
+/vendor/
+
+# Build
+*.test
+*.out
+coverage.html
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

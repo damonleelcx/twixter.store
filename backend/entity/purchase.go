@@ -11,9 +11,10 @@ import (
 type PurchaseType string
 
 const (
-	PurchaseTypeCredits    PurchaseType = "credits"    // 购买积分（从支付网关）
-	PurchaseTypeMembership PurchaseType = "membership" // 购买会员（使用积分）
-	PurchaseTypeContent    PurchaseType = "content"    // 购买内容（使用积分）
+	PurchaseTypeCredits        PurchaseType = "credits"         // 购买积分（从支付网关）
+	PurchaseTypeMembership     PurchaseType = "membership"      // 购买会员（使用积分）
+	PurchaseTypeContent        PurchaseType = "content"         // 购买内容（使用积分）
+	PurchaseTypeReferralReward PurchaseType = "referral_reward" // 推荐奖励（推荐新用户获得的积分）
 )
 
 // PurchaseStatus 购买状态枚举
@@ -99,6 +100,44 @@ func (p *PurchaseShard1) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// PurchaseShard2 分片2的购买表
+type PurchaseShard2 struct {
+	PurchaseBase
+}
+
+// TableName 指定表名
+func (PurchaseShard2) TableName() string {
+	return "purchases_shard_2"
+}
+
+// BeforeCreate 创建前的钩子函数
+func (p *PurchaseShard2) BeforeCreate(tx *gorm.DB) error {
+	// 设置默认状态
+	if p.Status == "" {
+		p.Status = PurchaseStatusPending
+	}
+	return nil
+}
+
+// PurchaseShard3 分片3的购买表
+type PurchaseShard3 struct {
+	PurchaseBase
+}
+
+// TableName 指定表名
+func (PurchaseShard3) TableName() string {
+	return "purchases_shard_3"
+}
+
+// BeforeCreate 创建前的钩子函数
+func (p *PurchaseShard3) BeforeCreate(tx *gorm.DB) error {
+	// 设置默认状态
+	if p.Status == "" {
+		p.Status = PurchaseStatusPending
+	}
+	return nil
+}
+
 // Purchase 通用购买接口（用于向后兼容和辅助函数）
 type Purchase struct {
 	PurchaseBase
@@ -120,7 +159,7 @@ func (p *Purchase) BeforeCreate(tx *gorm.DB) error {
 
 // GetPurchaseShardNumber 根据用户ID获取购买表分片编号（用于分片策略）
 func GetPurchaseShardNumber(userID uint) int {
-	return int(userID % 2)
+	return int(userID % 4)
 }
 
 // GetPurchaseShardTableName 根据用户ID获取购买表分片表名

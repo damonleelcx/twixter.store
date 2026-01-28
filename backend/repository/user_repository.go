@@ -27,6 +27,7 @@ type UserRepository interface {
 	List(limit, offset int) ([]entity.User, error)
 	Count() (int64, error)
 	GetByAccountType(accountType entity.AccountType, limit, offset int) ([]entity.User, error)
+	GetByReferralCode(referralCode string) (*entity.UserBase, error) // 根据推荐码查找用户
 }
 
 // userRepository 用户仓库实现
@@ -166,4 +167,22 @@ func (r *userRepository) GetByAccountType(accountType entity.AccountType, limit,
 		return nil, err
 	}
 	return users, nil
+}
+
+// GetByReferralCode 根据推荐码查找用户（需要搜索所有分片）
+func (r *userRepository) GetByReferralCode(referralCode string) (*entity.UserBase, error) {
+	// 先搜索分片0
+	var user0 entity.UserShard0
+	if err := r.db.Where("referral_code = ?", referralCode).First(&user0).Error; err == nil {
+		return &user0.UserBase, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// 再搜索分片1
+	var user1 entity.UserShard1
+	if err := r.db.Where("referral_code = ?", referralCode).First(&user1).Error; err != nil {
+		return nil, err
+	}
+	return &user1.UserBase, nil
 }

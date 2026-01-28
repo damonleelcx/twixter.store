@@ -38,14 +38,22 @@ docker push damonleelcx/twixter.store-backend:latest
 
 ### 使用 Docker Compose 运行（包含 PostgreSQL 和 Redis）
 
+1. **确保在 `backend` 目录下**，且该目录已有 `.env` 文件（可参考 `.env.example` 创建）。
+2. **启动服务**（Docker Compose 会自动读取同目录下的 `.env` 并注入到容器）：
+
 ```bash
+cd backend
 docker-compose up -d
 ```
 
 这将启动：
 - 后端服务（端口 8080）
-- PostgreSQL 数据库（端口 5432）
 - Redis 缓存（端口 6379）
+- Zookeeper + Kafka（端口 9092）
+
+**说明**：`docker-compose.yml` 中已配置 `env_file: .env`，因此无需额外参数，`.env` 中的变量会同时用于：
+- 在 compose 文件中做变量替换（如 `${DB_HOST}`）
+- 作为容器的环境变量传入后端服务
 
 ### 仅运行后端容器
 

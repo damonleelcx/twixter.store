@@ -73,49 +73,99 @@ func (r *purchaseRepository) Delete(id uint) error {
 // CreateInShard 在分片表中创建购买记录
 func (r *purchaseRepository) CreateInShard(userID uint, purchase *entity.PurchaseBase) error {
 	shardNum := entity.GetPurchaseShardNumber(userID)
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
+		shardPurchase := entity.PurchaseShard0{PurchaseBase: *purchase}
+		return r.db.Create(&shardPurchase).Error
+	case 1:
+		shardPurchase := entity.PurchaseShard1{PurchaseBase: *purchase}
+		return r.db.Create(&shardPurchase).Error
+	case 2:
+		shardPurchase := entity.PurchaseShard2{PurchaseBase: *purchase}
+		return r.db.Create(&shardPurchase).Error
+	case 3:
+		shardPurchase := entity.PurchaseShard3{PurchaseBase: *purchase}
+		return r.db.Create(&shardPurchase).Error
+	default:
 		shardPurchase := entity.PurchaseShard0{PurchaseBase: *purchase}
 		return r.db.Create(&shardPurchase).Error
 	}
-	shardPurchase := entity.PurchaseShard1{PurchaseBase: *purchase}
-	return r.db.Create(&shardPurchase).Error
 }
 
 // GetByIDFromShard 从分片表中根据ID获取购买记录
 func (r *purchaseRepository) GetByIDFromShard(userID uint, id uint) (*entity.PurchaseBase, error) {
 	shardNum := entity.GetPurchaseShardNumber(userID)
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
+		var purchase entity.PurchaseShard0
+		if err := r.db.First(&purchase, id).Error; err != nil {
+			return nil, err
+		}
+		return &purchase.PurchaseBase, nil
+	case 1:
+		var purchase entity.PurchaseShard1
+		if err := r.db.First(&purchase, id).Error; err != nil {
+			return nil, err
+		}
+		return &purchase.PurchaseBase, nil
+	case 2:
+		var purchase entity.PurchaseShard2
+		if err := r.db.First(&purchase, id).Error; err != nil {
+			return nil, err
+		}
+		return &purchase.PurchaseBase, nil
+	case 3:
+		var purchase entity.PurchaseShard3
+		if err := r.db.First(&purchase, id).Error; err != nil {
+			return nil, err
+		}
+		return &purchase.PurchaseBase, nil
+	default:
 		var purchase entity.PurchaseShard0
 		if err := r.db.First(&purchase, id).Error; err != nil {
 			return nil, err
 		}
 		return &purchase.PurchaseBase, nil
 	}
-	var purchase entity.PurchaseShard1
-	if err := r.db.First(&purchase, id).Error; err != nil {
-		return nil, err
-	}
-	return &purchase.PurchaseBase, nil
 }
 
 // UpdateInShard 在分片表中更新购买记录
 func (r *purchaseRepository) UpdateInShard(userID uint, purchase *entity.PurchaseBase) error {
 	shardNum := entity.GetPurchaseShardNumber(userID)
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
+		shardPurchase := entity.PurchaseShard0{PurchaseBase: *purchase}
+		return r.db.Save(&shardPurchase).Error
+	case 1:
+		shardPurchase := entity.PurchaseShard1{PurchaseBase: *purchase}
+		return r.db.Save(&shardPurchase).Error
+	case 2:
+		shardPurchase := entity.PurchaseShard2{PurchaseBase: *purchase}
+		return r.db.Save(&shardPurchase).Error
+	case 3:
+		shardPurchase := entity.PurchaseShard3{PurchaseBase: *purchase}
+		return r.db.Save(&shardPurchase).Error
+	default:
 		shardPurchase := entity.PurchaseShard0{PurchaseBase: *purchase}
 		return r.db.Save(&shardPurchase).Error
 	}
-	shardPurchase := entity.PurchaseShard1{PurchaseBase: *purchase}
-	return r.db.Save(&shardPurchase).Error
 }
 
 // DeleteFromShard 从分片表中删除购买记录（软删除）
 func (r *purchaseRepository) DeleteFromShard(userID uint, id uint) error {
 	shardNum := entity.GetPurchaseShardNumber(userID)
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
+		return r.db.Delete(&entity.PurchaseShard0{}, id).Error
+	case 1:
+		return r.db.Delete(&entity.PurchaseShard1{}, id).Error
+	case 2:
+		return r.db.Delete(&entity.PurchaseShard2{}, id).Error
+	case 3:
+		return r.db.Delete(&entity.PurchaseShard3{}, id).Error
+	default:
 		return r.db.Delete(&entity.PurchaseShard0{}, id).Error
 	}
-	return r.db.Delete(&entity.PurchaseShard1{}, id).Error
 }
 
 // GetByUserID 根据用户ID获取购买记录列表（从分片表）
@@ -123,7 +173,8 @@ func (r *purchaseRepository) GetByUserID(userID uint, limit, offset int) ([]enti
 	shardNum := entity.GetPurchaseShardNumber(userID)
 	var purchases []entity.PurchaseBase
 
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
 		var shardPurchases []entity.PurchaseShard0
 		query := r.db.Where("user_id = ?", userID).
 			Limit(limit).Offset(offset).Order("created_at DESC")
@@ -133,8 +184,28 @@ func (r *purchaseRepository) GetByUserID(userID uint, limit, offset int) ([]enti
 		for _, p := range shardPurchases {
 			purchases = append(purchases, p.PurchaseBase)
 		}
-	} else {
+	case 1:
 		var shardPurchases []entity.PurchaseShard1
+		query := r.db.Where("user_id = ?", userID).
+			Limit(limit).Offset(offset).Order("created_at DESC")
+		if err := query.Find(&shardPurchases).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range shardPurchases {
+			purchases = append(purchases, p.PurchaseBase)
+		}
+	case 2:
+		var shardPurchases []entity.PurchaseShard2
+		query := r.db.Where("user_id = ?", userID).
+			Limit(limit).Offset(offset).Order("created_at DESC")
+		if err := query.Find(&shardPurchases).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range shardPurchases {
+			purchases = append(purchases, p.PurchaseBase)
+		}
+	case 3:
+		var shardPurchases []entity.PurchaseShard3
 		query := r.db.Where("user_id = ?", userID).
 			Limit(limit).Offset(offset).Order("created_at DESC")
 		if err := query.Find(&shardPurchases).Error; err != nil {
@@ -153,7 +224,8 @@ func (r *purchaseRepository) GetByType(userID uint, purchaseType entity.Purchase
 	shardNum := entity.GetPurchaseShardNumber(userID)
 	var purchases []entity.PurchaseBase
 
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
 		var shardPurchases []entity.PurchaseShard0
 		query := r.db.Where("user_id = ? AND purchase_type = ?", userID, purchaseType).
 			Limit(limit).Offset(offset).Order("created_at DESC")
@@ -163,8 +235,28 @@ func (r *purchaseRepository) GetByType(userID uint, purchaseType entity.Purchase
 		for _, p := range shardPurchases {
 			purchases = append(purchases, p.PurchaseBase)
 		}
-	} else {
+	case 1:
 		var shardPurchases []entity.PurchaseShard1
+		query := r.db.Where("user_id = ? AND purchase_type = ?", userID, purchaseType).
+			Limit(limit).Offset(offset).Order("created_at DESC")
+		if err := query.Find(&shardPurchases).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range shardPurchases {
+			purchases = append(purchases, p.PurchaseBase)
+		}
+	case 2:
+		var shardPurchases []entity.PurchaseShard2
+		query := r.db.Where("user_id = ? AND purchase_type = ?", userID, purchaseType).
+			Limit(limit).Offset(offset).Order("created_at DESC")
+		if err := query.Find(&shardPurchases).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range shardPurchases {
+			purchases = append(purchases, p.PurchaseBase)
+		}
+	case 3:
+		var shardPurchases []entity.PurchaseShard3
 		query := r.db.Where("user_id = ? AND purchase_type = ?", userID, purchaseType).
 			Limit(limit).Offset(offset).Order("created_at DESC")
 		if err := query.Find(&shardPurchases).Error; err != nil {
@@ -183,7 +275,8 @@ func (r *purchaseRepository) GetByStatus(userID uint, status entity.PurchaseStat
 	shardNum := entity.GetPurchaseShardNumber(userID)
 	var purchases []entity.PurchaseBase
 
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
 		var shardPurchases []entity.PurchaseShard0
 		query := r.db.Where("user_id = ? AND status = ?", userID, status).
 			Limit(limit).Offset(offset).Order("created_at DESC")
@@ -193,8 +286,28 @@ func (r *purchaseRepository) GetByStatus(userID uint, status entity.PurchaseStat
 		for _, p := range shardPurchases {
 			purchases = append(purchases, p.PurchaseBase)
 		}
-	} else {
+	case 1:
 		var shardPurchases []entity.PurchaseShard1
+		query := r.db.Where("user_id = ? AND status = ?", userID, status).
+			Limit(limit).Offset(offset).Order("created_at DESC")
+		if err := query.Find(&shardPurchases).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range shardPurchases {
+			purchases = append(purchases, p.PurchaseBase)
+		}
+	case 2:
+		var shardPurchases []entity.PurchaseShard2
+		query := r.db.Where("user_id = ? AND status = ?", userID, status).
+			Limit(limit).Offset(offset).Order("created_at DESC")
+		if err := query.Find(&shardPurchases).Error; err != nil {
+			return nil, err
+		}
+		for _, p := range shardPurchases {
+			purchases = append(purchases, p.PurchaseBase)
+		}
+	case 3:
+		var shardPurchases []entity.PurchaseShard3
 		query := r.db.Where("user_id = ? AND status = ?", userID, status).
 			Limit(limit).Offset(offset).Order("created_at DESC")
 		if err := query.Find(&shardPurchases).Error; err != nil {
@@ -234,12 +347,34 @@ func (r *purchaseRepository) GetByContentID(contentID uint, limit, offset int) (
 		purchases = append(purchases, p.PurchaseBase)
 	}
 
+	// 搜索分片2
+	var shard2Purchases []entity.PurchaseShard2
+	query2 := r.db.Where("content_id = ?", contentID).
+		Limit(limit).Offset(offset).Order("created_at DESC")
+	if err := query2.Find(&shard2Purchases).Error; err != nil && err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+	for _, p := range shard2Purchases {
+		purchases = append(purchases, p.PurchaseBase)
+	}
+
+	// 搜索分片3
+	var shard3Purchases []entity.PurchaseShard3
+	query3 := r.db.Where("content_id = ?", contentID).
+		Limit(limit).Offset(offset).Order("created_at DESC")
+	if err := query3.Find(&shard3Purchases).Error; err != nil && err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+	for _, p := range shard3Purchases {
+		purchases = append(purchases, p.PurchaseBase)
+	}
+
 	return purchases, nil
 }
 
 // GetByTransactionID 根据交易ID获取购买记录（需要搜索所有分片）
 func (r *purchaseRepository) GetByTransactionID(transactionID string) (*entity.PurchaseBase, error) {
-	// 先搜索分片0
+	// 搜索分片0
 	var purchase0 entity.PurchaseShard0
 	if err := r.db.Where("transaction_id = ?", transactionID).First(&purchase0).Error; err == nil {
 		return &purchase0.PurchaseBase, nil
@@ -247,17 +382,33 @@ func (r *purchaseRepository) GetByTransactionID(transactionID string) (*entity.P
 		return nil, err
 	}
 
-	// 再搜索分片1
+	// 搜索分片1
 	var purchase1 entity.PurchaseShard1
-	if err := r.db.Where("transaction_id = ?", transactionID).First(&purchase1).Error; err != nil {
+	if err := r.db.Where("transaction_id = ?", transactionID).First(&purchase1).Error; err == nil {
+		return &purchase1.PurchaseBase, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return &purchase1.PurchaseBase, nil
+
+	// 搜索分片2
+	var purchase2 entity.PurchaseShard2
+	if err := r.db.Where("transaction_id = ?", transactionID).First(&purchase2).Error; err == nil {
+		return &purchase2.PurchaseBase, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// 搜索分片3
+	var purchase3 entity.PurchaseShard3
+	if err := r.db.Where("transaction_id = ?", transactionID).First(&purchase3).Error; err != nil {
+		return nil, err
+	}
+	return &purchase3.PurchaseBase, nil
 }
 
 // GetByGatewayOrderID 根据支付网关订单ID获取购买记录（需要搜索所有分片）
 func (r *purchaseRepository) GetByGatewayOrderID(gatewayOrderID string) (*entity.PurchaseBase, error) {
-	// 先搜索分片0
+	// 搜索分片0
 	var purchase0 entity.PurchaseShard0
 	if err := r.db.Where("gateway_order_id = ?", gatewayOrderID).First(&purchase0).Error; err == nil {
 		return &purchase0.PurchaseBase, nil
@@ -265,12 +416,28 @@ func (r *purchaseRepository) GetByGatewayOrderID(gatewayOrderID string) (*entity
 		return nil, err
 	}
 
-	// 再搜索分片1
+	// 搜索分片1
 	var purchase1 entity.PurchaseShard1
-	if err := r.db.Where("gateway_order_id = ?", gatewayOrderID).First(&purchase1).Error; err != nil {
+	if err := r.db.Where("gateway_order_id = ?", gatewayOrderID).First(&purchase1).Error; err == nil {
+		return &purchase1.PurchaseBase, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return &purchase1.PurchaseBase, nil
+
+	// 搜索分片2
+	var purchase2 entity.PurchaseShard2
+	if err := r.db.Where("gateway_order_id = ?", gatewayOrderID).First(&purchase2).Error; err == nil {
+		return &purchase2.PurchaseBase, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// 搜索分片3
+	var purchase3 entity.PurchaseShard3
+	if err := r.db.Where("gateway_order_id = ?", gatewayOrderID).First(&purchase3).Error; err != nil {
+		return nil, err
+	}
+	return &purchase3.PurchaseBase, nil
 }
 
 // CountByUserID 统计用户的购买记录数量（从分片表）
@@ -278,13 +445,24 @@ func (r *purchaseRepository) CountByUserID(userID uint) (int64, error) {
 	shardNum := entity.GetPurchaseShardNumber(userID)
 	var count int64
 
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
 		if err := r.db.Model(&entity.PurchaseShard0{}).
 			Where("user_id = ?", userID).Count(&count).Error; err != nil {
 			return 0, err
 		}
-	} else {
+	case 1:
 		if err := r.db.Model(&entity.PurchaseShard1{}).
+			Where("user_id = ?", userID).Count(&count).Error; err != nil {
+			return 0, err
+		}
+	case 2:
+		if err := r.db.Model(&entity.PurchaseShard2{}).
+			Where("user_id = ?", userID).Count(&count).Error; err != nil {
+			return 0, err
+		}
+	case 3:
+		if err := r.db.Model(&entity.PurchaseShard3{}).
 			Where("user_id = ?", userID).Count(&count).Error; err != nil {
 			return 0, err
 		}
@@ -298,13 +476,24 @@ func (r *purchaseRepository) CountByType(userID uint, purchaseType entity.Purcha
 	shardNum := entity.GetPurchaseShardNumber(userID)
 	var count int64
 
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
 		if err := r.db.Model(&entity.PurchaseShard0{}).
 			Where("user_id = ? AND purchase_type = ?", userID, purchaseType).Count(&count).Error; err != nil {
 			return 0, err
 		}
-	} else {
+	case 1:
 		if err := r.db.Model(&entity.PurchaseShard1{}).
+			Where("user_id = ? AND purchase_type = ?", userID, purchaseType).Count(&count).Error; err != nil {
+			return 0, err
+		}
+	case 2:
+		if err := r.db.Model(&entity.PurchaseShard2{}).
+			Where("user_id = ? AND purchase_type = ?", userID, purchaseType).Count(&count).Error; err != nil {
+			return 0, err
+		}
+	case 3:
+		if err := r.db.Model(&entity.PurchaseShard3{}).
 			Where("user_id = ? AND purchase_type = ?", userID, purchaseType).Count(&count).Error; err != nil {
 			return 0, err
 		}
@@ -318,13 +507,24 @@ func (r *purchaseRepository) CountByStatus(userID uint, status entity.PurchaseSt
 	shardNum := entity.GetPurchaseShardNumber(userID)
 	var count int64
 
-	if shardNum == 0 {
+	switch shardNum {
+	case 0:
 		if err := r.db.Model(&entity.PurchaseShard0{}).
 			Where("user_id = ? AND status = ?", userID, status).Count(&count).Error; err != nil {
 			return 0, err
 		}
-	} else {
+	case 1:
 		if err := r.db.Model(&entity.PurchaseShard1{}).
+			Where("user_id = ? AND status = ?", userID, status).Count(&count).Error; err != nil {
+			return 0, err
+		}
+	case 2:
+		if err := r.db.Model(&entity.PurchaseShard2{}).
+			Where("user_id = ? AND status = ?", userID, status).Count(&count).Error; err != nil {
+			return 0, err
+		}
+	case 3:
+		if err := r.db.Model(&entity.PurchaseShard3{}).
 			Where("user_id = ? AND status = ?", userID, status).Count(&count).Error; err != nil {
 			return 0, err
 		}
@@ -335,7 +535,7 @@ func (r *purchaseRepository) CountByStatus(userID uint, status entity.PurchaseSt
 
 // GetTotalRevenue 获取总收入（需要搜索所有分片）
 func (r *purchaseRepository) GetTotalRevenue(purchaseType entity.PurchaseType) (float64, error) {
-	var total0, total1 float64
+	var total0, total1, total2, total3 float64
 
 	// 统计分片0
 	if err := r.db.Model(&entity.PurchaseShard0{}).
@@ -353,5 +553,21 @@ func (r *purchaseRepository) GetTotalRevenue(purchaseType entity.PurchaseType) (
 		return 0, err
 	}
 
-	return total0 + total1, nil
+	// 统计分片2
+	if err := r.db.Model(&entity.PurchaseShard2{}).
+		Where("purchase_type = ? AND status = ?", purchaseType, entity.PurchaseStatusCompleted).
+		Select("COALESCE(SUM(amount), 0)").
+		Scan(&total2).Error; err != nil {
+		return 0, err
+	}
+
+	// 统计分片3
+	if err := r.db.Model(&entity.PurchaseShard3{}).
+		Where("purchase_type = ? AND status = ?", purchaseType, entity.PurchaseStatusCompleted).
+		Select("COALESCE(SUM(amount), 0)").
+		Scan(&total3).Error; err != nil {
+		return 0, err
+	}
+
+	return total0 + total1 + total2 + total3, nil
 }
