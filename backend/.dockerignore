@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# 环境变量文件（如果需要，可以在运行时挂载）
+.env
+.env.local
+.env.*.local
+
+# 测试文件
+*_test.go
+test/
+tests/
+
+# 文档
+README.md
+*.md
+
+# 构建产物
+main
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
