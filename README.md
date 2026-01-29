@@ -19,3 +19,6 @@ kafka-server-start.bat C:\Users\damon\kafka\config\server.properties
 
 
 go run main.go
+
+Note:
+1. Do not validate access with account type, validate with permissions only

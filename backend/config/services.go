@@ -174,6 +174,7 @@ func InitMiddleware(redisClient *redis.Client) *middleware.CacheMiddleware {
 	middleware.DefaultRateLimiter = middleware.NewRedisRateLimiter(redisClient, 100, 1*time.Minute)
 	middleware.StrictRateLimiter = middleware.NewRedisRateLimiter(redisClient, 10, 1*time.Minute)
 	middleware.AuthRateLimiter = middleware.NewRedisRateLimiter(redisClient, 5, 1*time.Minute)
+	middleware.RefreshRateLimiter = middleware.NewRedisRateLimiter(redisClient, 30, 1*time.Minute)
 
 	// 初始化 Redis 缓存中间件
 	cacheMiddleware := middleware.NewCacheMiddleware(redisClient, "api_cache:", 5*time.Minute)

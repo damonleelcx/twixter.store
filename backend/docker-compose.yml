@@ -40,6 +40,9 @@ services:
       - FFPROBE_PATH=
       # Temporary directory for video processing
       - TEMP_DIR=${TEMP_DIR:-/tmp/video-processing}
+      # Seed admin (if no admin exists): set in .env and loaded via env_file
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     env_file:
       - .env
     volumes:

@@ -214,4 +214,8 @@ var (
 	// AuthRateLimiter Authentication rate limiter (5 requests per minute)
 	// Will be initialized with Redis in main.go
 	AuthRateLimiter RateLimiter
+
+	// RefreshRateLimiter Refresh token rate limiter (30 requests per minute)
+	// More lenient than AuthRateLimiter so multiple tabs/retries can refresh without 429
+	RefreshRateLimiter RateLimiter
 )

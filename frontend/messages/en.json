@@ -1,0 +1,152 @@
+{
+  "nav": {
+    "home": "Home",
+    "explore": "Explore",
+    "notifications": "Notifications",
+    "messages": "Messages",
+    "bookmarks": "Bookmarks",
+    "profile": "Profile",
+    "post": "Post",
+    "adminUpload": "Admin Upload",
+    "subscribe": "Subscribe"
+  },
+  "feed": {
+    "home": "Home",
+    "forYou": "For you",
+    "following": "Following",
+    "composePlaceholder": "What is happening?!",
+    "post": "Post",
+    "loading": "Loading...",
+    "allCaughtUp": "You're all caught up"
+  },
+  "compose": {
+    "media": "Media",
+    "gif": "GIF",
+    "poll": "Poll"
+  },
+  "sidebar": {
+    "premiumTitle": "Subscribe to Premium",
+    "premiumDescription": "Subscribe to unlock all content and support the platform.",
+    "subscribe": "Subscribe",
+    "whatsHappening": "What's happening",
+    "trending": "Trending",
+    "posts": "{count}K posts"
+  },
+  "tweets": {
+    "welcome": "Welcome to Twixter! A fresh take on social. Build something amazing. 🚀",
+    "designDaily": "Mobile-first design isn't optional anymore. Your users are on their phones. Make it count.",
+    "devTips": "Tip: Use CSS safe-area-inset for notched devices. Your bottom nav will thank you.",
+    "react": "React 19 is here. Server Components, actions, and better hydration. What are you building?"
+  },
+  "locale": {
+    "en": "English",
+    "zh": "中文",
+    "switchTo": "Switch language"
+  },
+  "theme": {
+    "switchToLight": "Switch to light theme",
+    "switchToDark": "Switch to dark theme"
+  },
+  "postDetail": {
+    "back": "Back",
+    "title": "Post",
+    "reply": "Reply",
+    "repost": "Repost",
+    "like": "Like",
+    "share": "Share",
+    "bookmark": "Bookmark",
+    "showReplies": "Show replies"
+  },
+  "auth": {
+    "signIn": "Sign in",
+    "signUp": "Sign up",
+    "createAccount": "Create your account",
+    "email": "Email",
+    "emailPlaceholder": "you@example.com",
+    "password": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "username": "Username (optional)",
+    "usernamePlaceholder": "Display name",
+    "referralCode": "Referral code (optional)",
+    "viewing": "Preferred view",
+    "viewingLight": "Light",
+    "viewingDark": "Dark",
+    "forgotPassword": "Forgot password?",
+    "forgotPasswordTitle": "Find your account",
+    "forgotPasswordSubtitle": "Enter your email and we'll send you a reset link.",
+    "resetPassword": "Reset password",
+    "resetPasswordTitle": "Choose a new password",
+    "newPassword": "New password",
+    "newPasswordPlaceholder": "At least 8 characters",
+    "confirmPassword": "Confirm password",
+    "submit": "Next",
+    "submitReset": "Reset password",
+    "submitSendLink": "Send link",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?",
+    "backToSignIn": "Back to sign in",
+    "successReset": "Password reset. You can sign in now.",
+    "errorGeneric": "Something went wrong. Try again.",
+    "forgotPasswordSuccess": "If an account exists for {email}, we sent a password reset link. Check your inbox.",
+    "requestNewLink": "Request a new link",
+    "errorPasswordMin": "Password must be at least 8 characters",
+    "errorPasswordMismatch": "Passwords do not match",
+    "errorMissingToken": "Missing reset token. Use the link from your email.",
+    "logOut": "Log out",
+    "walletBalance": "Wallet balance",
+    "credits": "credits",
+    "buyCredits": "Buy credits",
+    "creditsPackageHint": "Choose a package. You will complete payment with options.",
+    "membershipStatus": "Membership",
+    "membershipActive": "Active",
+    "membershipNone": "None",
+    "membershipExpiresAt": "Expires at",
+    "subscribePage": "Subscribe",
+    "plan1Month": "1 month",
+    "plan3Months": "3 months",
+    "plan9Months": "9 months",
+    "payment": "Payment",
+    "processing": "Processing…",
+    "payNow": "Pay",
+    "backToPlans": "Back to plans"
+  },
+  "purchaseReturn": {
+    "verifyingTitle": "Verifying payment...",
+    "verifyingHint": "Please wait.",
+    "verificationFailed": "Verification failed",
+    "paymentComplete": "Payment complete",
+    "creditsAdded": "Your credits have been added to your wallet.",
+    "paymentNotComplete": "Payment not complete",
+    "statusHint": "Status: {status}. Complete payment or try again.",
+    "home": "Home"
+  },
+  "meta": {
+    "title": "Twixter - Home",
+    "description": "A fresh take on social"
+  },
+  "admin": {
+    "upload": {
+      "title": "Bulk Upload Videos",
+      "back": "Back to Home",
+      "loading": "Checking access...",
+      "file": "Video file",
+      "name": "Name",
+      "namePlaceholder": "Video name",
+      "description": "Description",
+      "descriptionPlaceholder": "Optional description",
+      "priceCredits": "Price (credits)",
+      "tags": "Tags",
+      "tagsPlaceholder": "Search or add tags...",
+      "video": "Video",
+      "addVideo": "Add another video",
+      "remove": "Remove",
+      "submit": "Upload",
+      "submitting": "Uploading...",
+      "cancel": "Cancel",
+      "success": "Videos uploaded successfully.",
+      "errorNoVideos": "Please add at least one video with a name.",
+      "errorMismatch": "Each video must have a file and a name.",
+      "errorNotLoggedIn": "Please log in to upload."
+    }
+  }
+}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -35,6 +36,15 @@ type AuthService interface {
 	LockAccount(userID uint, duration time.Duration, reason string) error
 	UnlockAccount(userID uint) error
 	CheckAccountLocked(userID uint) (bool, error)
+
+	// GetUserPermissionNames 获取用户权限名称列表（用于前端权限判断）
+	GetUserPermissionNames(userID uint) ([]string, error)
+	// GetWalletBalance 获取用户钱包余额（积分）
+	GetWalletBalance(userID uint) (int64, error)
+	// GetMembershipStatus 获取用户会员状态：active 表示有效会员并返回到期时间，none 表示无有效会员
+	GetMembershipStatus(userID uint) (status string, expiresAt *time.Time)
+	// EnsureAdminSeed 若不存在任何 admin 账户则根据环境变量创建种子 admin（ADMIN_EMAIL、ADMIN_PASSWORD）
+	EnsureAdminSeed(adminEmail, adminPassword string) error
 }
 
 // authService Authentication service implementation
@@ -235,6 +245,11 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 			return err
 		}
 
+		// Remove from users table permanently (Unscoped = hard delete; source of truth is the shard only)
+		if err := tx.Unscoped().Delete(userEntity).Error; err != nil {
+			return err
+		}
+
 		// Create wallet for new user
 		wallet := &entity.Wallet{
 			UserID:      userEntity.ID,
@@ -268,27 +283,27 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 
 		// Grant permissions based on account type
 		if accountType == entity.AccountTypeDark {
-			// Dark account: grant can_view_nsfw permission
-			var permission entity.Permission
-			if err := tx.Where("name = ?", "can_view_nsfw").First(&permission).Error; err != nil {
-				return fmt.Errorf("failed to get can_view_nsfw permission: %w", err)
-			}
-			// Check if permission already exists
-			var existingUserPermission entity.UserPermission
-			err := tx.Where("user_id = ? AND permission_id = ?", userEntity.ID, permission.ID).
-				First(&existingUserPermission).Error
-			if err != nil && err != gorm.ErrRecordNotFound {
-				return fmt.Errorf("failed to check existing permission: %w", err)
-			}
-			if err == gorm.ErrRecordNotFound {
-				// Create new permission (ShardNumber will be set automatically by BeforeCreate hook)
-				userPermission := &entity.UserPermission{
-					UserID:       userEntity.ID,
-					PermissionID: permission.ID,
-					ShardNumber:  entity.GetShardNumber(userEntity.ID),
+			// Dark account: grant can_view_nsfw and can_search_tags permissions
+			for _, permName := range []string{"can_view_nsfw", "can_search_tags"} {
+				var permission entity.Permission
+				if err := tx.Where("name = ?", permName).First(&permission).Error; err != nil {
+					return fmt.Errorf("failed to get %s permission: %w", permName, err)
 				}
-				if err := tx.Create(userPermission).Error; err != nil {
-					return fmt.Errorf("failed to grant can_view_nsfw permission: %w", err)
+				var existingUserPermission entity.UserPermission
+				err := tx.Where("user_id = ? AND permission_id = ?", userEntity.ID, permission.ID).
+					First(&existingUserPermission).Error
+				if err != nil && err != gorm.ErrRecordNotFound {
+					return fmt.Errorf("failed to check existing permission: %w", err)
+				}
+				if err == gorm.ErrRecordNotFound {
+					userPermission := &entity.UserPermission{
+						UserID:       userEntity.ID,
+						PermissionID: permission.ID,
+						ShardNumber:  entity.GetShardNumber(userEntity.ID),
+					}
+					if err := tx.Create(userPermission).Error; err != nil {
+						return fmt.Errorf("failed to grant %s permission: %w", permName, err)
+					}
 				}
 			}
 		}
@@ -384,19 +399,16 @@ func (s *authService) Login(email, password, ipAddress, userAgent, deviceInfo st
 		return nil, nil, fmt.Errorf("failed to update user info: %w", err)
 	}
 
-	// If user is admin, ensure they have all necessary permissions
+	// If user is admin, ensure they have all permission types
 	if user.AccountType == entity.AccountTypeAdmin {
-		adminPermissions := []string{"can_view_nsfw", "can_view_analytics", "can_upload_content"}
-		for _, permName := range adminPermissions {
-			permission, err := s.permissionRepo.GetByName(permName)
-			if err != nil {
-				// Permission might not exist yet, skip it
-				continue
-			}
-			// Grant permission if not already granted (GrantPermission handles duplicates)
-			if err := s.userPermissionRepo.GrantPermission(user.ID, permission.ID); err != nil {
-				// Log error but don't fail login
-				fmt.Printf("Warning: failed to grant permission %s to admin user %d: %v\n", permName, user.ID, err)
+		allPermissions, err := s.permissionRepo.GetSystemPermissions()
+		if err != nil {
+			fmt.Printf("Warning: failed to get system permissions for admin user %d: %v\n", user.ID, err)
+		} else {
+			for _, permission := range allPermissions {
+				if err := s.userPermissionRepo.GrantPermission(user.ID, permission.ID); err != nil {
+					fmt.Printf("Warning: failed to grant permission %s to admin user %d: %v\n", permission.Name, user.ID, err)
+				}
 			}
 		}
 	}
@@ -698,4 +710,102 @@ func (s *authService) CheckAccountLocked(userID uint) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// GetUserPermissionNames 获取用户权限名称列表
+func (s *authService) GetUserPermissionNames(userID uint) ([]string, error) {
+	permissions, err := s.userPermissionRepo.GetUserPermissions(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user permissions: %w", err)
+	}
+	names := make([]string, 0, len(permissions))
+	for _, p := range permissions {
+		names = append(names, p.Name)
+	}
+	return names, nil
+}
+
+// GetWalletBalance 获取用户钱包余额（积分）
+func (s *authService) GetWalletBalance(userID uint) (int64, error) {
+	return s.walletRepo.GetBalance(userID)
+}
+
+// GetMembershipStatus 获取用户会员状态
+func (s *authService) GetMembershipStatus(userID uint) (status string, expiresAt *time.Time) {
+	purchase, err := s.purchaseRepo.GetLatestActiveMembership(userID)
+	if err != nil || purchase == nil || purchase.ExpiresAt == nil {
+		return "none", nil
+	}
+	return "active", purchase.ExpiresAt
+}
+
+// EnsureAdminSeed 若不存在任何 admin 账户则创建种子 admin；adminEmail/adminPassword 为空时跳过
+func (s *authService) EnsureAdminSeed(adminEmail, adminPassword string) error {
+	if adminEmail == "" || adminPassword == "" {
+		return nil
+	}
+	count, err := s.userRepo.CountByAccountTypeInShards(entity.AccountTypeAdmin)
+	if err != nil {
+		return fmt.Errorf("count admin: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+	// 检查邮箱是否已被使用
+	existing, _ := s.userRepo.GetByEmailFromShard(adminEmail)
+	if existing != nil {
+		log.Printf("EnsureAdminSeed: email %s already registered, skipping seed", adminEmail)
+		return nil
+	}
+	hashedPassword, err := hashPassword(adminPassword)
+	if err != nil {
+		return fmt.Errorf("hash admin password: %w", err)
+	}
+	newReferralCode, err := s.generateReferralCode()
+	if err != nil {
+		return fmt.Errorf("generate referral code: %w", err)
+	}
+	user := &entity.UserBase{
+		Email:        adminEmail,
+		Username:     "twixter_user",
+		Password:     hashedPassword,
+		AccountType:  entity.AccountTypeAdmin,
+		ReferralCode: newReferralCode,
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		userEntity := &entity.User{UserBase: *user}
+		if err := tx.Create(userEntity).Error; err != nil {
+			return err
+		}
+		createdUser := &entity.UserBase{
+			ID:           userEntity.ID,
+			Email:        userEntity.Email,
+			Username:     userEntity.Username,
+			Password:     userEntity.Password,
+			AccountType:  userEntity.AccountType,
+			IPAddress:    userEntity.IPAddress,
+			ReferralCode: userEntity.ReferralCode,
+			ReferredBy:   userEntity.ReferredBy,
+			CreatedAt:    userEntity.CreatedAt,
+			UpdatedAt:    userEntity.UpdatedAt,
+		}
+		if err := s.userRepo.CreateInShard(userEntity.ID, createdUser); err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Delete(userEntity).Error; err != nil {
+			return err
+		}
+		wallet := &entity.Wallet{
+			UserID:      userEntity.ID,
+			Balance:     0,
+			TotalEarned: 0,
+			TotalSpent:  0,
+		}
+		return tx.Create(wallet).Error
+	})
+	if err != nil {
+		return fmt.Errorf("create admin user: %w", err)
+	}
+	log.Printf("Seeded admin account: %s", adminEmail)
+	return nil
 }

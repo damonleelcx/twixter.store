@@ -3,6 +3,7 @@ package repository
 import (
 	"backend/entity"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -28,6 +29,9 @@ type PurchaseRepository interface {
 	GetByContentID(contentID uint, limit, offset int) ([]entity.PurchaseBase, error)
 	GetByTransactionID(transactionID string) (*entity.PurchaseBase, error)
 	GetByGatewayOrderID(gatewayOrderID string) (*entity.PurchaseBase, error)
+
+	// GetLatestActiveMembership 获取用户当前有效的会员（未过期且已完成的最近一条）
+	GetLatestActiveMembership(userID uint) (*entity.PurchaseBase, error)
 
 	// 统计操作
 	CountByUserID(userID uint) (int64, error)
@@ -438,6 +442,74 @@ func (r *purchaseRepository) GetByGatewayOrderID(gatewayOrderID string) (*entity
 		return nil, err
 	}
 	return &purchase3.PurchaseBase, nil
+}
+
+// GetLatestActiveMembership 获取用户当前有效的会员（未过期且已完成的最近一条，按 expires_at 降序取第一条）
+func (r *purchaseRepository) GetLatestActiveMembership(userID uint) (*entity.PurchaseBase, error) {
+	now := time.Now()
+	shardNum := entity.GetPurchaseShardNumber(userID)
+	switch shardNum {
+	case 0:
+		var p entity.PurchaseShard0
+		err := r.db.Where("user_id = ? AND purchase_type = ? AND status = ? AND expires_at IS NOT NULL AND expires_at > ?",
+			userID, entity.PurchaseTypeMembership, entity.PurchaseStatusCompleted, now).
+			Order("expires_at DESC").Limit(1).First(&p).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &p.PurchaseBase, nil
+	case 1:
+		var p entity.PurchaseShard1
+		err := r.db.Where("user_id = ? AND purchase_type = ? AND status = ? AND expires_at IS NOT NULL AND expires_at > ?",
+			userID, entity.PurchaseTypeMembership, entity.PurchaseStatusCompleted, now).
+			Order("expires_at DESC").Limit(1).First(&p).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &p.PurchaseBase, nil
+	case 2:
+		var p entity.PurchaseShard2
+		err := r.db.Where("user_id = ? AND purchase_type = ? AND status = ? AND expires_at IS NOT NULL AND expires_at > ?",
+			userID, entity.PurchaseTypeMembership, entity.PurchaseStatusCompleted, now).
+			Order("expires_at DESC").Limit(1).First(&p).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &p.PurchaseBase, nil
+	case 3:
+		var p entity.PurchaseShard3
+		err := r.db.Where("user_id = ? AND purchase_type = ? AND status = ? AND expires_at IS NOT NULL AND expires_at > ?",
+			userID, entity.PurchaseTypeMembership, entity.PurchaseStatusCompleted, now).
+			Order("expires_at DESC").Limit(1).First(&p).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &p.PurchaseBase, nil
+	default:
+		var p entity.PurchaseShard0
+		err := r.db.Where("user_id = ? AND purchase_type = ? AND status = ? AND expires_at IS NOT NULL AND expires_at > ?",
+			userID, entity.PurchaseTypeMembership, entity.PurchaseStatusCompleted, now).
+			Order("expires_at DESC").Limit(1).First(&p).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return &p.PurchaseBase, nil
+	}
 }
 
 // CountByUserID 统计用户的购买记录数量（从分片表）

@@ -10,7 +10,9 @@ import (
 // RunMigrations 运行数据库迁移和创建索引
 func RunMigrations(db *gorm.DB) error {
 	// 自动迁移数据库表（包括分片表）
+	// users 表用于注册时生成全局 user ID，再按 ID 写入对应分片
 	if err := db.AutoMigrate(
+		&entity.User{},
 		&entity.UserShard0{},
 		&entity.UserShard1{},
 		&entity.Session{},
@@ -35,7 +37,7 @@ func RunMigrations(db *gorm.DB) error {
 		return err
 	}
 
-	log.Println("Database migration completed successfully (users_shard_0, users_shard_1, sessions, permissions, user_permissions, contents, tags, content_tags, purchases_shard_0, purchases_shard_1, purchases_shard_2, purchases_shard_3, wallets, analytics)")
+	log.Println("Database migration completed successfully (users, users_shard_0, users_shard_1, sessions, permissions, user_permissions, contents, tags, content_tags, purchases_shard_0, purchases_shard_1, purchases_shard_2, purchases_shard_3, wallets, analytics)")
 	return nil
 }
 

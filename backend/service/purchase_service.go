@@ -67,9 +67,18 @@ func (s *purchaseService) CreateMembershipCheckout(userID uint, months int) (*st
 		return nil, fmt.Errorf("failed to create checkout session: %w", err)
 	}
 
-	// 计算价格
-	monthlyPrice := 6.99
-	totalAmount := monthlyPrice * float64(months)
+	// 价格与前端 subscribe 页一致：1 月 6.99，3 月 16.99，9 月 56.99
+	var totalAmount float64
+	switch months {
+	case 1:
+		totalAmount = 6.99
+	case 3:
+		totalAmount = 16.99
+	case 9:
+		totalAmount = 56.99
+	default:
+		totalAmount = 6.99 * float64(months)
+	}
 
 	// 创建待处理的购买记录
 	purchase := &entity.PurchaseBase{

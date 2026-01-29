@@ -136,32 +136,3 @@ func GetSessionFromContext(c *gin.Context) (*entity.Session, bool) {
 	sess, ok := session.(*entity.Session)
 	return sess, ok
 }
-
-// RequireAccountType Require specific account type middleware
-func RequireAccountType(accountType entity.AccountType) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		user, exists := GetUserFromContext(c)
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Unauthorized",
-			})
-			c.Abort()
-			return
-		}
-
-		if user.AccountType != accountType {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Insufficient permissions",
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
-	}
-}
-
-// RequireAdmin Require admin account type
-func RequireAdmin() gin.HandlerFunc {
-	return RequireAccountType(entity.AccountTypeAdmin)
-}

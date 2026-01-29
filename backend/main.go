@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"backend/config"
 	"backend/database"
@@ -51,6 +52,11 @@ func main() {
 	services, err := config.InitServices(db, repos)
 	if err != nil {
 		log.Fatalf("Services initialization failed: %v", err)
+	}
+
+	// 若不存在任何 admin 则根据环境变量 ADMIN_EMAIL、ADMIN_PASSWORD 创建种子 admin
+	if err := services.AuthService.EnsureAdminSeed(os.Getenv("ADMIN_EMAIL"), os.Getenv("ADMIN_PASSWORD")); err != nil {
+		log.Printf("Warning: EnsureAdminSeed failed: %v", err)
 	}
 
 	// 初始化 controllers

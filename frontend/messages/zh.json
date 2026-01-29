@@ -1,0 +1,152 @@
+{
+  "nav": {
+    "home": "首页",
+    "explore": "探索",
+    "notifications": "通知",
+    "messages": "私信",
+    "bookmarks": "书签",
+    "profile": "个人",
+    "post": "发帖",
+    "adminUpload": "管理员上传",
+    "subscribe": "订阅"
+  },
+  "feed": {
+    "home": "首页",
+    "forYou": "为你推荐",
+    "following": "关注",
+    "composePlaceholder": "有什么新鲜事？",
+    "post": "发帖",
+    "loading": "加载中...",
+    "allCaughtUp": "已经到底了"
+  },
+  "compose": {
+    "media": "媒体",
+    "gif": "GIF",
+    "poll": "投票"
+  },
+  "sidebar": {
+    "premiumTitle": "订阅 Premium",
+    "premiumDescription": "订阅以解锁全部内容并支持平台。",
+    "subscribe": "订阅",
+    "whatsHappening": "正在发生",
+    "trending": "趋势",
+    "posts": "{count}千 帖子"
+  },
+  "tweets": {
+    "welcome": "欢迎使用 Twixter！全新的社交体验。一起做点酷的。🚀",
+    "designDaily": "移动优先设计不再是可选项。用户都在手机上，请认真对待。",
+    "devTips": "小技巧：在刘海屏设备上使用 CSS safe-area-inset，底部导航会更好用。",
+    "react": "React 19 来了。服务端组件、actions 与更好的水合。你在造什么？"
+  },
+  "locale": {
+    "en": "English",
+    "zh": "中文",
+    "switchTo": "切换语言"
+  },
+  "theme": {
+    "switchToLight": "切换到浅色主题",
+    "switchToDark": "切换到深色主题"
+  },
+  "postDetail": {
+    "back": "返回",
+    "title": "帖子",
+    "reply": "回复",
+    "repost": "转发",
+    "like": "喜欢",
+    "share": "分享",
+    "bookmark": "书签",
+    "showReplies": "显示回复"
+  },
+  "auth": {
+    "signIn": "登录",
+    "signUp": "注册",
+    "createAccount": "创建账号",
+    "email": "邮箱",
+    "emailPlaceholder": "you@example.com",
+    "password": "密码",
+    "passwordPlaceholder": "输入密码",
+    "username": "用户名（选填）",
+    "usernamePlaceholder": "显示名称",
+    "referralCode": "推荐码（选填）",
+    "viewing": "偏好主题",
+    "viewingLight": "浅色",
+    "viewingDark": "深色",
+    "forgotPassword": "忘记密码？",
+    "forgotPasswordTitle": "找回账号",
+    "forgotPasswordSubtitle": "输入邮箱，我们将发送重置链接。",
+    "resetPassword": "重置密码",
+    "resetPasswordTitle": "设置新密码",
+    "newPassword": "新密码",
+    "newPasswordPlaceholder": "至少 8 个字符",
+    "confirmPassword": "确认密码",
+    "submit": "下一步",
+    "submitReset": "重置密码",
+    "submitSendLink": "发送链接",
+    "noAccount": "还没有账号？",
+    "hasAccount": "已有账号？",
+    "backToSignIn": "返回登录",
+    "successReset": "密码已重置，现在可以登录。",
+    "errorGeneric": "出错了，请重试。",
+    "forgotPasswordSuccess": "若存在与 {email} 对应的账号，我们已发送重置链接，请查收邮件。",
+    "requestNewLink": "重新获取链接",
+    "errorPasswordMin": "密码至少需要 8 个字符",
+    "errorPasswordMismatch": "两次输入的密码不一致",
+    "errorMissingToken": "缺少重置令牌，请使用邮件中的链接。",
+    "logOut": "退出登录",
+    "walletBalance": "钱包余额",
+    "credits": "积分",
+    "buyCredits": "购买积分",
+    "creditsPackageHint": "选择套餐后，将使用可选支付方式完成付款。",
+    "membershipStatus": "会员状态",
+    "membershipActive": "有效",
+    "membershipNone": "无",
+    "membershipExpiresAt": "到期时间",
+    "subscribePage": "订阅",
+    "plan1Month": "1 个月",
+    "plan3Months": "3 个月",
+    "plan9Months": "9 个月",
+    "payment": "支付",
+    "processing": "处理中…",
+    "payNow": "支付",
+    "backToPlans": "返回套餐"
+  },
+  "purchaseReturn": {
+    "verifyingTitle": "正在验证支付...",
+    "verifyingHint": "请稍候。",
+    "verificationFailed": "验证失败",
+    "paymentComplete": "支付完成",
+    "creditsAdded": "积分已添加到您的钱包。",
+    "paymentNotComplete": "支付未完成",
+    "statusHint": "状态：{status}。请完成支付或重试。",
+    "home": "首页"
+  },
+  "meta": {
+    "title": "Twixter - 首页",
+    "description": "全新的社交体验"
+  },
+  "admin": {
+    "upload": {
+      "title": "批量上传视频",
+      "back": "返回首页",
+      "loading": "正在验证权限...",
+      "file": "视频文件",
+      "name": "名称",
+      "namePlaceholder": "视频名称",
+      "description": "描述",
+      "descriptionPlaceholder": "可选描述",
+      "priceCredits": "价格（积分）",
+      "tags": "标签",
+      "tagsPlaceholder": "搜索或添加标签...",
+      "video": "视频",
+      "addVideo": "添加更多视频",
+      "remove": "移除",
+      "submit": "上传",
+      "submitting": "上传中...",
+      "cancel": "取消",
+      "success": "视频上传成功。",
+      "errorNoVideos": "请至少添加一个带名称的视频。",
+      "errorMismatch": "每个视频都必须选择文件并填写名称。",
+      "errorNotLoggedIn": "请先登录后再上传。"
+    }
+  }
+}

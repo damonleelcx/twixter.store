@@ -416,15 +416,25 @@ func (ac *AuthController) GetCurrentUser(c *gin.Context) {
 	}
 
 	userBase := user.(*entity.UserBase)
-	c.JSON(http.StatusOK, gin.H{
-		"user": gin.H{
-			"id":             userBase.ID,
-			"email":          userBase.Email,
-			"username":       userBase.Username,
-			"account_type":   userBase.AccountType,
-			"email_verified": userBase.EmailVerified,
-			"referral_code":  userBase.ReferralCode,
-			"created_at":     userBase.CreatedAt,
-		},
-	})
+	permissionNames, _ := ac.authService.GetUserPermissionNames(userBase.ID)
+	walletBalance, _ := ac.authService.GetWalletBalance(userBase.ID)
+	membershipStatus, membershipExpiresAt := ac.authService.GetMembershipStatus(userBase.ID)
+	userPayload := gin.H{
+		"id":                userBase.ID,
+		"email":             userBase.Email,
+		"username":          userBase.Username,
+		"account_type":      userBase.AccountType,
+		"email_verified":    userBase.EmailVerified,
+		"referral_code":     userBase.ReferralCode,
+		"created_at":        userBase.CreatedAt,
+		"permissions":       permissionNames,
+		"wallet_balance":    walletBalance,
+		"membership_status": membershipStatus,
+	}
+	if membershipExpiresAt != nil {
+		userPayload["membership_expires_at"] = membershipExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+	} else {
+		userPayload["membership_expires_at"] = nil
+	}
+	c.JSON(http.StatusOK, gin.H{"user": userPayload})
 }

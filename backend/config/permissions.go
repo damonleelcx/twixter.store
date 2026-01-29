@@ -32,6 +32,13 @@ func InitPermissions(db *gorm.DB) {
 			Action:      entity.ActionView,
 			IsSystem:    true,
 		},
+		{
+			Name:        "can_search_tags",
+			Description: "允许搜索标签",
+			Resource:    "tags",
+			Action:      entity.ActionView,
+			IsSystem:    true,
+		},
 	}
 
 	for _, perm := range permissions {

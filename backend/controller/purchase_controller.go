@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stripe/stripe-go/v84"
@@ -243,7 +244,7 @@ func (pc *PurchaseController) VerifyCheckout(c *gin.Context) {
 		return
 	}
 
-	_ = user.(*entity.UserBase)
+	userBase := user.(*entity.UserBase)
 
 	// 解析请求
 	var req VerifyCheckoutRequest
@@ -273,6 +274,10 @@ func (pc *PurchaseController) VerifyCheckout(c *gin.Context) {
 		if err := pc.purchaseService.HandleCheckoutCompleted(req.SessionID); err != nil {
 			// 记录错误但不影响状态返回
 			fmt.Printf("Warning: Failed to handle checkout completed: %v\n", err)
+		}
+		// 使该用户的 /api/auth/me 缓存失效，以便前端立即看到更新后的钱包余额
+		if middleware.GlobalCacheMiddleware != nil {
+			_ = middleware.GlobalCacheMiddleware.InvalidateUserCache(userBase.ID)
 		}
 	}
 
@@ -440,6 +445,14 @@ func (pc *PurchaseController) HandleStripeWebhook(c *gin.Context) {
 				"details": err.Error(),
 			})
 			return
+		}
+		// 使该用户的 /api/auth/me 缓存失效，以便前端立即看到更新后的钱包余额
+		if middleware.GlobalCacheMiddleware != nil && checkoutSession.Metadata != nil {
+			if userIDStr, ok := checkoutSession.Metadata["user_id"]; ok && userIDStr != "" {
+				if userID, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
+					_ = middleware.GlobalCacheMiddleware.InvalidateUserCache(uint(userID))
+				}
+			}
 		}
 
 	case "payment_intent.succeeded":

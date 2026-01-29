@@ -4,12 +4,44 @@ import (
 	"backend/entity"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/stripe/stripe-go/v84"
 	"github.com/stripe/stripe-go/v84/checkout/session"
 )
+
+// getStripeReturnURL returns a valid absolute URL for Stripe return_url (e.g. checkout session).
+// FRONTEND_URL must be set to a valid base URL (e.g. http://localhost:3000 or https://app.example.com).
+func getStripeReturnURL(path string) string {
+	base := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	if base == "" {
+		base = "http://localhost:3000"
+	}
+	base = strings.TrimSuffix(base, "/")
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "http://" + base
+	}
+	path = strings.TrimPrefix(path, "/")
+	return base + "/" + path
+}
+
+// validateReturnURL ensures the URL is valid for Stripe (absolute with scheme).
+func validateReturnURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("return_url must use http or https scheme")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("return_url must have a host")
+	}
+	return nil
+}
 
 // StripeService Stripe 支付服务接口
 type StripeService interface {
@@ -54,14 +86,22 @@ func (s *stripeService) CreateMembershipCheckoutSession(userID uint, months int)
 		return nil, fmt.Errorf("invalid months: must be 1, 3, or 9")
 	}
 
-	// 计算价格（$6.99/月）
-	monthlyPrice := 6.99
-	totalAmount := monthlyPrice * float64(months)
+	// 价格与前端 subscribe 页一致：1 月 6.99，3 月 16.99，9 月 56.99
+	var totalAmount float64
+	switch months {
+	case 1:
+		totalAmount = 6.99
+	case 3:
+		totalAmount = 16.99
+	case 9:
+		totalAmount = 56.99
+	default:
+		totalAmount = 6.99 * float64(months)
+	}
 
-	// 获取前端 URL（用于返回和取消）
-	frontendURL := os.Getenv("FRONTEND_URL")
-	if frontendURL == "" {
-		frontendURL = "http://localhost:3000"
+	returnURL := getStripeReturnURL("purchase/return?session_id={CHECKOUT_SESSION_ID}")
+	if err := validateReturnURL(returnURL); err != nil {
+		return nil, fmt.Errorf("invalid FRONTEND_URL for Stripe return_url: %w", err)
 	}
 
 	// 创建 Checkout Session
@@ -72,7 +112,7 @@ func (s *stripeService) CreateMembershipCheckoutSession(userID uint, months int)
 					Currency: stripe.String(string(stripe.CurrencyUSD)),
 					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
 						Name:        stripe.String(fmt.Sprintf("Membership - %d month(s)", months)),
-						Description: stripe.String(fmt.Sprintf("Premium membership for %d month(s) at $%.2f/month", months, monthlyPrice)),
+						Description: stripe.String(fmt.Sprintf("Premium membership for %d month(s) — $%.2f total", months, totalAmount)),
 					},
 					UnitAmount: stripe.Int64(int64(totalAmount * 100)), // Stripe 使用分为单位
 				},
@@ -81,7 +121,7 @@ func (s *stripeService) CreateMembershipCheckoutSession(userID uint, months int)
 		},
 		Mode:      stripe.String(string(stripe.CheckoutSessionModePayment)),
 		UIMode:    stripe.String("custom"),
-		ReturnURL: stripe.String(fmt.Sprintf("%s/purchase/return?session_id={CHECKOUT_SESSION_ID}", frontendURL)),
+		ReturnURL: stripe.String(returnURL),
 		Metadata: map[string]string{
 			"user_id":         fmt.Sprintf("%d", userID),
 			"purchase_type":   "membership",
@@ -107,10 +147,9 @@ func (s *stripeService) CreateCreditsCheckoutSession(userID uint, amount float64
 		return nil, fmt.Errorf("credits must be greater than 0")
 	}
 
-	// 获取前端 URL（用于返回和取消）
-	frontendURL := os.Getenv("FRONTEND_URL")
-	if frontendURL == "" {
-		frontendURL = "http://localhost:3000"
+	returnURL := getStripeReturnURL("purchase/return?session_id={CHECKOUT_SESSION_ID}")
+	if err := validateReturnURL(returnURL); err != nil {
+		return nil, fmt.Errorf("invalid FRONTEND_URL for Stripe return_url: %w", err)
 	}
 
 	// 创建 Checkout Session
@@ -130,7 +169,7 @@ func (s *stripeService) CreateCreditsCheckoutSession(userID uint, amount float64
 		},
 		Mode:      stripe.String(string(stripe.CheckoutSessionModePayment)),
 		UIMode:    stripe.String("custom"),
-		ReturnURL: stripe.String(fmt.Sprintf("%s/purchase/return?session_id={CHECKOUT_SESSION_ID}", frontendURL)),
+		ReturnURL: stripe.String(returnURL),
 		Metadata: map[string]string{
 			"user_id":       fmt.Sprintf("%d", userID),
 			"purchase_type": "credits",

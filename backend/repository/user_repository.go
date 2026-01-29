@@ -28,6 +28,7 @@ type UserRepository interface {
 	Count() (int64, error)
 	GetByAccountType(accountType entity.AccountType, limit, offset int) ([]entity.User, error)
 	GetByReferralCode(referralCode string) (*entity.UserBase, error) // 根据推荐码查找用户
+	CountByAccountTypeInShards(accountType entity.AccountType) (int64, error) // 统计分片中某账户类型的数量
 }
 
 // userRepository 用户仓库实现
@@ -185,4 +186,16 @@ func (r *userRepository) GetByReferralCode(referralCode string) (*entity.UserBas
 		return nil, err
 	}
 	return &user1.UserBase, nil
+}
+
+// CountByAccountTypeInShards 统计分片中某账户类型的用户数量（users 表在注册后会删除记录，以分片为准）
+func (r *userRepository) CountByAccountTypeInShards(accountType entity.AccountType) (int64, error) {
+	var c0, c1 int64
+	if err := r.db.Model(&entity.UserShard0{}).Where("account_type = ?", accountType).Count(&c0).Error; err != nil {
+		return 0, err
+	}
+	if err := r.db.Model(&entity.UserShard1{}).Where("account_type = ?", accountType).Count(&c1).Error; err != nil {
+		return 0, err
+	}
+	return c0 + c1, nil
 }

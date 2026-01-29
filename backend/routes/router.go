@@ -72,10 +72,13 @@ func SetupRouter(
 	api := router.Group("/api")
 	{
 		setupAuthRoutes(api, controllers.AuthController, services.AuthService, cacheMiddleware)
-		
+
 		if controllers.ContentController != nil {
 			setupContentRoutes(api, controllers.ContentController, services.AuthService, repos, cacheMiddleware)
 		}
+
+		tagsController := controller.NewTagsController(repos.TagRepo)
+		setupTagsRoutes(api, tagsController, services.AuthService, repos)
 
 		if controllers.PurchaseController != nil {
 			setupPurchaseRoutes(api, controllers.PurchaseController, services.AuthService, cacheMiddleware)
@@ -95,10 +98,10 @@ func setupAuthRoutes(
 	authRoutes := api.Group("/auth")
 	{
 		// 公开路由：注册、登录、刷新token、密码重置
-		// 使用严格的限流中间件（AuthRateLimiter：5次/分钟）防止暴力破解
+		// 登录/注册等使用严格限流（5次/分钟）防暴力破解；refresh 使用宽松限流（30次/分钟）避免多标签/重试时 429
 		authRoutes.POST("/register", middleware.RateLimitMiddleware(middleware.AuthRateLimiter), authController.Register)
 		authRoutes.POST("/login", middleware.RateLimitMiddleware(middleware.AuthRateLimiter), authController.Login)
-		authRoutes.POST("/refresh", middleware.RateLimitMiddleware(middleware.AuthRateLimiter), authController.RefreshToken)
+		authRoutes.POST("/refresh", middleware.RateLimitMiddleware(middleware.RefreshRateLimiter), authController.RefreshToken)
 		authRoutes.POST("/password/reset/request", middleware.RateLimitMiddleware(middleware.AuthRateLimiter), authController.RequestPasswordReset)
 		authRoutes.POST("/password/reset", middleware.RateLimitMiddleware(middleware.AuthRateLimiter), authController.ResetPassword)
 
@@ -138,7 +141,7 @@ func setupContentRoutes(
 	contentRoutes.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimiter))
 	contentRoutes.Use(middleware.AuthMiddleware(authService))
 	{
-		// 批量上传视频（最多10个）- 需要 can_upload_content 权限
+		// 批量上传视频（最多10个）- 需要 admin 账户类型 + can_upload_content 权限
 		contentRoutes.POST("/videos/upload",
 			middleware.RequirePermission(repos.UserPermissionRepo, "can_upload_content"),
 			contentController.UploadVideos)
@@ -169,6 +172,24 @@ func setupContentRoutes(
 				VaryByQuery: true,
 			}),
 			contentController.GetContentAnalytics)
+	}
+}
+
+// setupTagsRoutes 设置标签路由
+func setupTagsRoutes(
+	api *gin.RouterGroup,
+	tagsController *controller.TagsController,
+	authService service.AuthService,
+	repos *config.Repositories,
+) {
+	tagsRoutes := api.Group("/tags")
+	tagsRoutes.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimiter))
+	tagsRoutes.Use(middleware.AuthMiddleware(authService))
+	{
+		// 搜索标签（自动完成）- 需 can_search_tags；admin 和 dark 账户类型默认拥有
+		tagsRoutes.GET("/search",
+			middleware.RequirePermission(repos.UserPermissionRepo, "can_search_tags"),
+			tagsController.SearchTags)
 	}
 }
 
