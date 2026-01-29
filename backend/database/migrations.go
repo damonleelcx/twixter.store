@@ -26,6 +26,7 @@ func RunMigrations(db *gorm.DB) error {
 		&entity.PurchaseShard1{},
 		&entity.PurchaseShard2{},
 		&entity.PurchaseShard3{},
+		&entity.ContentBookmark{},
 		&entity.Wallet{},
 		&entity.Analytics{},
 	); err != nil {

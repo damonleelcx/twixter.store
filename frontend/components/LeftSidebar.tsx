@@ -67,7 +67,11 @@ export function LeftSidebar({ locale }: LeftSidebarProps) {
                   ? `/${locale}/admin/upload`
                   : item.key === "profile"
                     ? `/${locale}/profile`
-                    : undefined
+                    : item.key === "bookmarks"
+                      ? `/${locale}/bookmarks`
+                      : item.key === "library"
+                        ? `/${locale}/library`
+                        : undefined
             }
           />
         ))}

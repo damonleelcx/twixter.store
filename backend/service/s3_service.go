@@ -2,10 +2,13 @@ package service
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -120,15 +123,46 @@ func (s *s3Service) UploadFile(bucket, key string, file io.Reader, contentType s
 	return url, nil
 }
 
-// UploadFileFromPath 从本地路径上传文件到S3
+// removeLocalWithRetry 关闭后删除本地文件；Windows 上句柄释放可能延迟，失败时重试
+func removeLocalWithRetry(filePath string) {
+	const (
+		retries  = 50
+		interval = 200 * time.Millisecond
+		winDelay = 200 * time.Millisecond // 首次删除前等待，给 Close() 后句柄释放时间
+	)
+	if runtime.GOOS == "windows" {
+		time.Sleep(winDelay)
+	}
+	for i := 0; i < retries; i++ {
+		err := os.Remove(filePath)
+		if err == nil || errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if i < retries-1 && (strings.Contains(err.Error(), "being used") || strings.Contains(err.Error(), "used by another process")) {
+			time.Sleep(interval)
+			continue
+		}
+		fmt.Printf("Warning: failed to remove local file after S3 upload: %s: %v\n", filePath, err)
+		return
+	}
+}
+
+// UploadFileFromPath 从本地路径上传文件到S3；无论成功或失败，返回前都会尝试删除本地文件以释放磁盘空间
 func (s *s3Service) UploadFileFromPath(bucket, key, filePath string, contentType string) (string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
-
-	return s.UploadFile(bucket, key, file, contentType)
+	url, err := s.UploadFile(bucket, key, file, contentType)
+	// 先关闭再删除，Windows 上需确保句柄释放后再 remove
+	if closeErr := file.Close(); closeErr != nil {
+		_ = closeErr
+	}
+	removeLocalWithRetry(filePath)
+	if err != nil {
+		return "", err
+	}
+	return url, nil
 }
 
 // DownloadFile 从S3下载文件

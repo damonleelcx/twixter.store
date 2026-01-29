@@ -5,6 +5,7 @@ import (
 	"backend/repository"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/stripe/stripe-go/v84"
 	"github.com/stripe/stripe-go/v84/checkout/session"
@@ -12,17 +13,26 @@ import (
 
 // PurchaseService 购买服务接口
 type PurchaseService interface {
-	// CreateMembershipCheckout 创建会员购买结账会话
+	// CreateMembershipCheckout 创建会员购买结账会话（Stripe）
 	CreateMembershipCheckout(userID uint, months int) (*stripe.CheckoutSession, error)
+
+	// CreateMembershipCheckoutPayPal 创建会员购买 PayPal 订单（备用支付）
+	CreateMembershipCheckoutPayPal(userID uint, months int) (orderID string, err error)
 
 	// CreateCreditsCheckout 创建积分购买结账会话
 	CreateCreditsCheckout(userID uint, amount float64, credits int64) (*stripe.CheckoutSession, error)
 
+	// CreateCreditsCheckoutPayPal 创建积分购买 PayPal 订单（备用支付）
+	CreateCreditsCheckoutPayPal(userID uint, amount float64, credits int64) (orderID string, err error)
+
 	// PurchaseContentWithCredits 使用积分购买内容
 	PurchaseContentWithCredits(userID uint, contentID uint) error
 
-	// HandleCheckoutCompleted 处理结账完成事件
+	// HandleCheckoutCompleted 处理结账完成事件（Stripe）
 	HandleCheckoutCompleted(sessionID string) error
+
+	// HandlePayPalCapture 处理 PayPal 订单捕获完成（需验证 order 属于 userID）
+	HandlePayPalCapture(orderID string, userID uint) error
 
 	// GetPurchaseHistory 获取购买历史
 	GetPurchaseHistory(userID uint, limit, offset int) ([]entity.PurchaseBase, error)
@@ -31,15 +41,17 @@ type PurchaseService interface {
 // purchaseService 购买服务实现
 type purchaseService struct {
 	stripeService StripeService
+	paypalService PayPalService
 	purchaseRepo  repository.PurchaseRepository
 	contentRepo   repository.ContentRepository
 	walletRepo    repository.WalletRepository
 	analyticsRepo repository.AnalyticsRepository
 }
 
-// NewPurchaseService 创建购买服务实例
+// NewPurchaseService 创建购买服务实例（paypalService 可选，为 nil 时 PayPal 相关方法返回错误）
 func NewPurchaseService(
 	stripeService StripeService,
+	paypalService PayPalService,
 	purchaseRepo repository.PurchaseRepository,
 	contentRepo repository.ContentRepository,
 	walletRepo repository.WalletRepository,
@@ -47,6 +59,7 @@ func NewPurchaseService(
 ) PurchaseService {
 	return &purchaseService{
 		stripeService: stripeService,
+		paypalService: paypalService,
 		purchaseRepo:  purchaseRepo,
 		contentRepo:   contentRepo,
 		walletRepo:    walletRepo,
@@ -108,6 +121,53 @@ func (s *purchaseService) CreateMembershipCheckout(userID uint, months int) (*st
 	return checkoutSession, nil
 }
 
+// membershipAmountAndDesc 返回会员套餐金额（美元字符串）与描述
+func membershipAmountAndDesc(months int) (amountUSD string, totalAmount float64, desc string) {
+	switch months {
+	case 1:
+		totalAmount = 6.99
+	case 3:
+		totalAmount = 16.99
+	case 9:
+		totalAmount = 56.99
+	default:
+		totalAmount = 6.99 * float64(months)
+	}
+	return fmt.Sprintf("%.2f", totalAmount), totalAmount, fmt.Sprintf("Premium membership for %d month(s)", months)
+}
+
+// CreateMembershipCheckoutPayPal 创建会员购买 PayPal 订单
+func (s *purchaseService) CreateMembershipCheckoutPayPal(userID uint, months int) (orderID string, err error) {
+	if months != 1 && months != 3 && months != 9 {
+		return "", fmt.Errorf("invalid months: must be 1, 3, or 9")
+	}
+	if s.paypalService == nil {
+		return "", fmt.Errorf("PayPal is not configured")
+	}
+
+	amountUSD, totalAmount, desc := membershipAmountAndDesc(months)
+	orderID, err = s.paypalService.CreateOrder(amountUSD, "USD", desc)
+	if err != nil {
+		return "", fmt.Errorf("failed to create PayPal order: %w", err)
+	}
+
+	purchase := &entity.PurchaseBase{
+		UserID:         userID,
+		PurchaseType:   entity.PurchaseTypeMembership,
+		Status:         entity.PurchaseStatusPending,
+		Amount:         totalAmount,
+		Currency:       "USD",
+		PaymentGateway: "paypal",
+		GatewayOrderID: orderID,
+		MembershipType: fmt.Sprintf("%d_months", months),
+		ExpiresAt:      nil,
+	}
+	if err := s.purchaseRepo.CreateInShard(userID, purchase); err != nil {
+		return "", fmt.Errorf("failed to create purchase record: %w", err)
+	}
+	return orderID, nil
+}
+
 // CreateCreditsCheckout 创建积分购买结账会话
 func (s *purchaseService) CreateCreditsCheckout(userID uint, amount float64, credits int64) (*stripe.CheckoutSession, error) {
 	if amount <= 0 {
@@ -150,6 +210,41 @@ func (s *purchaseService) CreateCreditsCheckout(userID uint, amount float64, cre
 	return checkoutSession, nil
 }
 
+// CreateCreditsCheckoutPayPal 创建积分购买 PayPal 订单
+func (s *purchaseService) CreateCreditsCheckoutPayPal(userID uint, amount float64, credits int64) (orderID string, err error) {
+	if amount <= 0 {
+		return "", fmt.Errorf("amount must be greater than 0")
+	}
+	if credits <= 0 {
+		return "", fmt.Errorf("credits must be greater than 0")
+	}
+	if s.paypalService == nil {
+		return "", fmt.Errorf("PayPal is not configured")
+	}
+
+	amountUSD := fmt.Sprintf("%.2f", amount)
+	desc := fmt.Sprintf("Credits - %d credits", credits)
+	orderID, err = s.paypalService.CreateOrder(amountUSD, "USD", desc)
+	if err != nil {
+		return "", fmt.Errorf("failed to create PayPal order: %w", err)
+	}
+
+	purchase := &entity.PurchaseBase{
+		UserID:         userID,
+		PurchaseType:   entity.PurchaseTypeCredits,
+		Status:         entity.PurchaseStatusPending,
+		Amount:         amount,
+		Currency:       "USD",
+		PaymentGateway: "paypal",
+		GatewayOrderID: orderID,
+		Credits:        credits,
+	}
+	if err := s.purchaseRepo.CreateInShard(userID, purchase); err != nil {
+		return "", fmt.Errorf("failed to create purchase record: %w", err)
+	}
+	return orderID, nil
+}
+
 // PurchaseContentWithCredits 使用积分购买内容
 func (s *purchaseService) PurchaseContentWithCredits(userID uint, contentID uint) error {
 	// 获取内容
@@ -158,13 +253,16 @@ func (s *purchaseService) PurchaseContentWithCredits(userID uint, contentID uint
 		return fmt.Errorf("content not found: %w", err)
 	}
 
-	// 检查内容是否有价格
+	// 检查内容是否有价格（价格即所需积分数，1 积分 = 1）
 	if content.Price <= 0 {
 		return fmt.Errorf("content is not for sale (price is 0 or not set)")
 	}
 
-	// 将价格转换为积分（假设 1 美元 = 100 积分，可以根据实际需求调整）
-	creditsRequired := int64(content.Price * 100)
+	// 内容价格即为所需积分数，用户只能用积分购买
+	creditsRequired := int64(math.Round(content.Price))
+	if creditsRequired <= 0 {
+		return fmt.Errorf("content price must be at least 1 credit")
+	}
 
 	// 检查用户是否有足够的积分
 	hasEnough, err := s.walletRepo.HasEnoughCredits(userID, creditsRequired)
@@ -185,11 +283,11 @@ func (s *purchaseService) PurchaseContentWithCredits(userID uint, contentID uint
 		UserID:         userID,
 		PurchaseType:   entity.PurchaseTypeContent,
 		Status:         entity.PurchaseStatusCompleted,
-		Credits:        creditsRequired, // 使用的积分数量
-		Amount:         content.Price,   // 内容价格（美元）
-		Currency:       "USD",
+		Credits:        creditsRequired, // 扣除的积分数
+		Amount:         0,               // 内容购买用积分，无美元金额
 		ContentID:      &contentID,
-		PaymentGateway: "wallet", // 使用钱包支付
+		PaymentGateway: "wallet",
+		PaymentMethod:  "wallet",
 	}
 
 	// 保存购买记录到分片表
@@ -211,6 +309,53 @@ func (s *purchaseService) PurchaseContentWithCredits(userID uint, contentID uint
 		fmt.Printf("Warning: Failed to add revenue for content %d: %v\n", contentID, err)
 	}
 
+	return nil
+}
+
+// HandlePayPalCapture 处理 PayPal 订单捕获完成
+func (s *purchaseService) HandlePayPalCapture(orderID string, userID uint) error {
+	if s.paypalService == nil {
+		return fmt.Errorf("PayPal is not configured")
+	}
+	_, err := s.paypalService.CaptureOrder(orderID)
+	if err != nil {
+		return fmt.Errorf("failed to capture PayPal order: %w", err)
+	}
+
+	purchase, err := s.purchaseRepo.GetByGatewayOrderID(orderID)
+	if err != nil {
+		return fmt.Errorf("purchase record not found: %w", err)
+	}
+	if purchase.UserID != userID {
+		return fmt.Errorf("order does not belong to current user")
+	}
+	if purchase.Status == entity.PurchaseStatusCompleted {
+		return nil
+	}
+
+	purchase.Status = entity.PurchaseStatusCompleted
+	purchase.PaymentMethod = "paypal"
+
+	switch purchase.PurchaseType {
+	case entity.PurchaseTypeMembership:
+		var months int
+		_, _ = fmt.Sscanf(purchase.MembershipType, "%d_months", &months)
+		if months <= 0 {
+			months = 1
+		}
+		expiresAt := CalculateMembershipExpiry(months)
+		purchase.ExpiresAt = &expiresAt
+	case entity.PurchaseTypeCredits:
+		if err := s.walletRepo.AddCredits(purchase.UserID, purchase.Credits); err != nil {
+			return fmt.Errorf("failed to add credits to wallet: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported purchase type for PayPal capture: %s", purchase.PurchaseType)
+	}
+
+	if err := s.purchaseRepo.UpdateInShard(purchase.UserID, purchase); err != nil {
+		return fmt.Errorf("failed to update purchase record: %w", err)
+	}
 	return nil
 }
 

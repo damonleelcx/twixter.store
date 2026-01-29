@@ -3,14 +3,20 @@ package service
 import (
 	"backend/entity"
 	"backend/repository"
+	"bytes"
 	"errors"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/gif"
 	"io"
 	"mime/multipart"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/disintegration/imaging"
 	"gorm.io/gorm"
 )
 
@@ -51,17 +57,60 @@ type ContentService interface {
 
 	// GetContentAnalytics 获取内容分析数据
 	GetContentAnalytics(contentID uint, startDate, endDate string) (map[string]interface{}, error)
+
+	// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买
+	ListFeed(category string, userID uint, limit, offset int) ([]ListFeedItem, error)
+
+	// GetGifPreview 返回 GIF 预览：已购买则流式返回原图；未购买则从 S3 取 GIF、模糊后返回 JPEG
+	GetGifPreview(fileID uint, userID uint) (body io.ReadCloser, contentType string, err error)
+
+	// GetAuthorForUserID 根据上传者 ID 返回作者用户名和头像 URL（用于帖子详情等）
+	GetAuthorForUserID(userID uint) (username string, avatar string)
+
+	// ListPurchasedContent 返回当前用户已购买的内容列表（Library 页），格式与 feed 一致
+	ListPurchasedContent(userID uint, limit, offset int) ([]ListFeedItem, error)
+
+	// AddBookmark 添加书签
+	AddBookmark(userID, contentID uint) error
+	// RemoveBookmark 移除书签
+	RemoveBookmark(userID, contentID uint) error
+	// IsBookmarked 当前用户是否已书签该内容
+	IsBookmarked(userID, contentID uint) (bool, error)
+	// ListBookmarkedContent 返回当前用户书签的内容列表（Bookmarks 页）
+	ListBookmarkedContent(userID uint, limit, offset int) ([]ListFeedItem, error)
+
+	// UserCanViewContent 用户是否可观看该内容（已购买或有效会员）
+	UserCanViewContent(userID uint, contentID uint) (bool, error)
+}
+
+// ListFeedItem feed 列表单项（含作者、时间戳，Twitter 风格）
+type ListFeedItem struct {
+	ID             uint    `json:"id"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	Category       string  `json:"category"`
+	Price          float64 `json:"price"`
+	PreviewGifURL  string  `json:"preview_gif_url"`
+	FirstFileID    uint    `json:"first_file_id"`
+	Purchased      bool    `json:"purchased"`
+	Bookmarked     bool    `json:"bookmarked,omitempty"`
+	CreatedAt      string  `json:"created_at"`
+	AuthorUsername string  `json:"author_username"`
+	AuthorAvatar   string  `json:"author_avatar,omitempty"`
 }
 
 // contentService 内容服务实现
 type contentService struct {
-	contentRepo    repository.ContentRepository
-	fileRepo       repository.ContentFileRepository
-	tagRepo        repository.TagRepository
-	contentTagRepo repository.ContentTagRepository
-	analyticsRepo  repository.AnalyticsRepository
-	s3Service      S3Service
-	kafkaService   KafkaService
+	contentRepo         repository.ContentRepository
+	fileRepo            repository.ContentFileRepository
+	tagRepo             repository.TagRepository
+	contentTagRepo      repository.ContentTagRepository
+	contentBookmarkRepo repository.ContentBookmarkRepository
+	analyticsRepo       repository.AnalyticsRepository
+	purchaseRepo        repository.PurchaseRepository
+	userRepo            repository.UserRepository
+	s3Service           S3Service
+	kafkaService        KafkaService
 }
 
 // NewContentService 创建内容服务实例
@@ -70,18 +119,24 @@ func NewContentService(
 	fileRepo repository.ContentFileRepository,
 	tagRepo repository.TagRepository,
 	contentTagRepo repository.ContentTagRepository,
+	contentBookmarkRepo repository.ContentBookmarkRepository,
 	analyticsRepo repository.AnalyticsRepository,
+	purchaseRepo repository.PurchaseRepository,
+	userRepo repository.UserRepository,
 	s3Service S3Service,
 	kafkaService KafkaService,
 ) ContentService {
 	return &contentService{
-		contentRepo:    contentRepo,
-		fileRepo:       fileRepo,
-		tagRepo:        tagRepo,
-		contentTagRepo: contentTagRepo,
-		analyticsRepo:  analyticsRepo,
-		s3Service:      s3Service,
-		kafkaService:   kafkaService,
+		contentRepo:         contentRepo,
+		fileRepo:            fileRepo,
+		tagRepo:             tagRepo,
+		contentTagRepo:      contentTagRepo,
+		contentBookmarkRepo: contentBookmarkRepo,
+		analyticsRepo:       analyticsRepo,
+		purchaseRepo:        purchaseRepo,
+		userRepo:            userRepo,
+		s3Service:           s3Service,
+		kafkaService:        kafkaService,
 	}
 }
 
@@ -141,119 +196,113 @@ func (s *contentService) ensureTagExists(tagName string) (uint, error) {
 	return newTag.ID, nil
 }
 
-// UploadVideos 批量上传视频（最多10个），每个视频有独立的元数据
+// createdUpload 单次上传中已创建的资源，用于失败时回滚
+type createdUpload struct {
+	contentID uint
+	fileID    uint
+	s3Key     string
+}
+
+// UploadVideos 批量上传视频（最多10个），每个视频有独立的元数据。任一步失败会回滚本请求内已创建的 S3 与 DB 记录。
 func (s *contentService) UploadVideos(userID uint, files []*multipart.FileHeader, videosMetadata []VideoMetadata) ([]*entity.ContentFile, error) {
-	// 验证文件数量
 	if len(files) == 0 {
 		return nil, errors.New("no files provided")
 	}
 	if len(files) > 10 {
 		return nil, errors.New("maximum 10 files allowed")
 	}
-
-	// 验证元数据数量与文件数量匹配
 	if len(videosMetadata) != len(files) {
 		return nil, fmt.Errorf("number of video metadata (%d) does not match number of files (%d)", len(videosMetadata), len(files))
 	}
 
-	// 处理每个文件，为每个视频创建独立的 Content 记录
 	contentFiles := make([]*entity.ContentFile, 0, len(files))
+	created := make([]createdUpload, 0, len(files))
 
 	for i, fileHeader := range files {
 		metadata := videosMetadata[i]
 
-		// 验证元数据
 		if strings.TrimSpace(metadata.Name) == "" {
+			s.rollbackUploads(created)
 			return nil, fmt.Errorf("video %d: name is required", i+1)
 		}
-
-		// 确定分类（默认为 light）
 		category := entity.ContentCategoryLight
 		if metadata.Category == "dark" {
 			category = entity.ContentCategoryDark
 		}
-
-		// 创建内容记录（每个视频独立）
 		content := &entity.Content{
 			Name:        strings.TrimSpace(metadata.Name),
 			Description: strings.TrimSpace(metadata.Description),
 			Type:        entity.ContentTypeVideo,
 			Status:      entity.ContentStatusPending,
 			UploadedBy:  userID,
-			Price:       metadata.Price, // 设置价格
-			Category:    category,       // 设置分类
+			Price:       metadata.Price,
+			Category:    category,
 		}
-
 		if err := s.contentRepo.Create(content); err != nil {
+			s.rollbackUploads(created)
 			return nil, fmt.Errorf("failed to create content for video %d: %w", i+1, err)
 		}
+		created = append(created, createdUpload{contentID: content.ID, fileID: 0, s3Key: ""})
 
-		// 处理标签：查找或创建标签，并关联到内容
 		if len(metadata.Tags) > 0 {
 			tagIDs := make([]uint, 0, len(metadata.Tags))
 			for _, tagName := range metadata.Tags {
 				tagID, err := s.ensureTagExists(tagName)
 				if err != nil {
+					s.rollbackUploads(created)
 					return nil, fmt.Errorf("failed to process tag '%s' for video %d: %w", tagName, i+1, err)
 				}
 				if tagID > 0 {
 					tagIDs = append(tagIDs, tagID)
 				}
 			}
-
-			// 批量添加标签到内容
 			if len(tagIDs) > 0 {
 				if err := s.contentTagRepo.AddTagsToContent(content.ID, tagIDs); err != nil {
+					s.rollbackUploads(created)
 					return nil, fmt.Errorf("failed to add tags to content %d: %w", content.ID, err)
 				}
 			}
 		}
 
-		// 打开文件
 		file, err := fileHeader.Open()
 		if err != nil {
+			s.rollbackUploads(created)
 			return nil, fmt.Errorf("failed to open file %s: %w", fileHeader.Filename, err)
 		}
-
-		// 生成S3路径
 		timestamp := time.Now().Unix()
 		s3Key := fmt.Sprintf("videos/%d/%d_%s", userID, timestamp, filepath.Base(fileHeader.Filename))
-
-		// 上传到S3
 		fileURL, err := s.s3Service.UploadFile("", s3Key, file, fileHeader.Header.Get("Content-Type"))
-		file.Close() // 立即关闭文件
+		file.Close()
 		if err != nil {
+			s.rollbackUploads(created)
 			return nil, fmt.Errorf("failed to upload file to S3: %w", err)
 		}
+		created[len(created)-1].s3Key = s3Key
 
-		// 获取文件大小
 		fileSize := fileHeader.Size
-
-		// 创建文件记录
 		contentFile := &entity.ContentFile{
 			ContentID:        content.ID,
 			FileName:         fileHeader.Filename,
-			FileIndex:        0, // 每个内容只有一个文件，所以索引为0
+			FileIndex:        0,
 			OriginalFilePath: s3Key,
 			OriginalFileURL:  fileURL,
 			OriginalFileSize: fileSize,
 			MimeType:         fileHeader.Header.Get("Content-Type"),
 			Stage:            entity.StageUploaded,
 		}
-
 		if err := s.fileRepo.Create(contentFile); err != nil {
+			s.rollbackUploads(created)
 			return nil, fmt.Errorf("failed to create file record: %w", err)
 		}
-
+		created[len(created)-1].fileID = contentFile.ID
 		contentFiles = append(contentFiles, contentFile)
 
-		// 更新内容状态为处理中
 		content.Status = entity.ContentStatusProcessing
 		if err := s.contentRepo.Update(content); err != nil {
+			s.rollbackUploads(created)
 			return nil, fmt.Errorf("failed to update content status: %w", err)
 		}
 
-		// 发送Kafka消息触发GIF生成
 		message := &KafkaMessage{
 			Type:      "gif_generation",
 			ContentID: content.ID,
@@ -264,14 +313,28 @@ func (s *contentService) UploadVideos(userID uint, files []*multipart.FileHeader
 				"file_url": fileURL,
 			},
 		}
-
 		if err := s.kafkaService.SendMessage(TopicGifGeneration, message); err != nil {
-			// 记录错误但不中断流程
 			fmt.Printf("Failed to send Kafka message for file %d: %v\n", contentFile.ID, err)
 		}
 	}
-
 	return contentFiles, nil
+}
+
+// rollbackUploads 回滚本请求内已创建的资源：删除 S3 对象、文件记录、内容标签、内容记录（逆序）
+func (s *contentService) rollbackUploads(created []createdUpload) {
+	for i := len(created) - 1; i >= 0; i-- {
+		c := created[i]
+		if c.s3Key != "" {
+			_ = s.s3Service.DeleteFile("", c.s3Key)
+		}
+		if c.fileID != 0 {
+			_ = s.fileRepo.Delete(c.fileID)
+		}
+		if c.contentID != 0 {
+			_ = s.contentTagRepo.RemoveAllTagsFromContent(c.contentID)
+			_ = s.contentRepo.Delete(c.contentID)
+		}
+	}
 }
 
 // GetContent 获取内容
@@ -321,17 +384,14 @@ func (s *contentService) StreamFileFromS3(s3Key string) (io.ReadCloser, string, 
 }
 
 // GetSegmentFilePath 获取分片文件的S3路径
-// .ts 分片文件与 .m3u8 文件在同一目录下
+// .ts 分片文件与 .m3u8 文件在同一目录下。使用 path 包保证 S3 key 始终为正斜杠（Windows 下 filepath 会产出反斜杠导致 S3 找不到文件）。
 func (s *contentService) GetSegmentFilePath(m3u8Path string, segmentName string) string {
-	// 移除 .m3u8 文件名，获取目录路径
-	dir := filepath.Dir(m3u8Path)
-	// 构建分片文件的完整路径（使用 filepath.Join 确保路径正确）
-	// 注意：segmentName 可能包含查询参数，需要提取实际文件名
+	dir := path.Dir(m3u8Path)
 	actualSegmentName := segmentName
 	if idx := strings.Index(segmentName, "?"); idx != -1 {
 		actualSegmentName = segmentName[:idx]
 	}
-	return filepath.Join(dir, actualSegmentName)
+	return path.Join(dir, actualSegmentName)
 }
 
 // RecordView 记录内容观看
@@ -414,4 +474,373 @@ func (s *contentService) GetContentAnalytics(contentID uint, startDate, endDate 
 	}
 
 	return result, nil
+}
+
+// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买
+func (s *contentService) ListFeed(category string, userID uint, limit, offset int) ([]ListFeedItem, error) {
+	contents, err := s.contentRepo.ListFeedByCategory(category, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ListFeedItem, 0, len(contents))
+	for _, c := range contents {
+		authorUsername := ""
+		if c.UploadedBy > 0 && s.userRepo != nil {
+			// Prefer sharded tables (users_shard_0/1) where admin/twixter_user typically lives
+			if u, err := s.userRepo.GetByIDFromShard(c.UploadedBy, c.UploadedBy); err == nil && u != nil {
+				if u.Username != "" {
+					authorUsername = u.Username
+				} else if u.Email != "" {
+					authorUsername = u.Email
+				}
+			}
+			// Fallback to default users table if not in shard
+			if authorUsername == "" {
+				if u, err := s.userRepo.GetByID(c.UploadedBy); err == nil && u != nil {
+					if u.Username != "" {
+						authorUsername = u.Username
+					} else if u.Email != "" {
+						authorUsername = u.Email
+					}
+				}
+			}
+		}
+		if authorUsername == "" {
+			authorUsername = c.Name
+		}
+		files, err := s.fileRepo.GetByContentID(c.ID)
+		if err != nil || len(files) == 0 {
+			purchased := false
+			bookmarked := false
+			if userID > 0 {
+				purchased, _ = s.UserCanViewContent(userID, c.ID)
+				if s.contentBookmarkRepo != nil {
+					bookmarked, _ = s.contentBookmarkRepo.Exists(userID, c.ID)
+				}
+			}
+			out = append(out, ListFeedItem{
+				ID:             c.ID,
+				Name:           c.Name,
+				Description:    c.Description,
+				Category:       string(c.Category),
+				Price:          c.Price,
+				CreatedAt:      c.CreatedAt.Format(time.RFC3339),
+				AuthorUsername: authorUsername,
+				Purchased:      purchased,
+				Bookmarked:     bookmarked,
+			})
+			continue
+		}
+		first := files[0]
+		previewGif := first.GifFileURL
+		purchased := false
+		bookmarked := false
+		if userID > 0 {
+			purchased, _ = s.UserCanViewContent(userID, c.ID)
+			bookmarked, _ = s.contentBookmarkRepo.Exists(userID, c.ID)
+		}
+		out = append(out, ListFeedItem{
+			ID:             c.ID,
+			Name:           c.Name,
+			Description:    c.Description,
+			Category:       string(c.Category),
+			Price:          c.Price,
+			PreviewGifURL:  previewGif,
+			FirstFileID:    first.ID,
+			Purchased:      purchased,
+			Bookmarked:     bookmarked,
+			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
+			AuthorUsername: authorUsername,
+		})
+	}
+	return out, nil
+}
+
+// GetAuthorForUserID 根据上传者 ID 返回作者用户名和头像 URL
+func (s *contentService) GetAuthorForUserID(userID uint) (username string, avatar string) {
+	if userID == 0 || s.userRepo == nil {
+		return "", ""
+	}
+	if u, err := s.userRepo.GetByIDFromShard(userID, userID); err == nil && u != nil {
+		if u.Username != "" {
+			return u.Username, ""
+		}
+		if u.Email != "" {
+			return u.Email, ""
+		}
+		return "", ""
+	}
+	if u, err := s.userRepo.GetByID(userID); err == nil && u != nil {
+		if u.Username != "" {
+			return u.Username, ""
+		}
+		if u.Email != "" {
+			return u.Email, ""
+		}
+	}
+	return "", ""
+}
+
+// ListPurchasedContent 返回当前用户已购买的内容列表（Library 页）
+func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([]ListFeedItem, error) {
+	if userID == 0 {
+		return nil, nil
+	}
+	purchases, err := s.purchaseRepo.GetByType(userID, entity.PurchaseTypeContent, limit*3, offset) // fetch extra for filtering
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[uint]bool)
+	var contentIDs []uint
+	for _, p := range purchases {
+		if p.Status != entity.PurchaseStatusCompleted || p.ContentID == nil {
+			continue
+		}
+		cid := *p.ContentID
+		if seen[cid] {
+			continue
+		}
+		seen[cid] = true
+		contentIDs = append(contentIDs, cid)
+		if len(contentIDs) >= limit {
+			break
+		}
+	}
+	out := make([]ListFeedItem, 0, len(contentIDs))
+	for _, cid := range contentIDs {
+		c, err := s.contentRepo.GetByID(cid)
+		if err != nil || !c.IsReady() {
+			continue
+		}
+		authorUsername, _ := s.GetAuthorForUserID(c.UploadedBy)
+		if authorUsername == "" {
+			authorUsername = c.Name
+		}
+		files, err := s.fileRepo.GetByContentID(c.ID)
+		if err != nil || len(files) == 0 {
+			out = append(out, ListFeedItem{
+				ID:             c.ID,
+				Name:           c.Name,
+				Description:    c.Description,
+				Category:       string(c.Category),
+				Price:          c.Price,
+				CreatedAt:      c.CreatedAt.Format(time.RFC3339),
+				AuthorUsername: authorUsername,
+				Purchased:      true,
+				Bookmarked:     true,
+			})
+			continue
+		}
+		first := files[0]
+		bookmarked := true
+		out = append(out, ListFeedItem{
+			ID:             c.ID,
+			Name:           c.Name,
+			Description:    c.Description,
+			Category:       string(c.Category),
+			Price:          c.Price,
+			PreviewGifURL:  first.GifFileURL,
+			FirstFileID:    first.ID,
+			Purchased:      true,
+			Bookmarked:     bookmarked,
+			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
+			AuthorUsername: authorUsername,
+		})
+	}
+	return out, nil
+}
+
+// AddBookmark 添加书签
+func (s *contentService) AddBookmark(userID, contentID uint) error {
+	_, err := s.contentRepo.GetByID(contentID)
+	if err != nil {
+		return fmt.Errorf("content not found: %w", err)
+	}
+	exists, err := s.contentBookmarkRepo.Exists(userID, contentID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil // already bookmarked
+	}
+	return s.contentBookmarkRepo.Create(&entity.ContentBookmark{UserID: userID, ContentID: contentID})
+}
+
+// RemoveBookmark 移除书签
+func (s *contentService) RemoveBookmark(userID, contentID uint) error {
+	return s.contentBookmarkRepo.Delete(userID, contentID)
+}
+
+// IsBookmarked 当前用户是否已书签该内容
+func (s *contentService) IsBookmarked(userID, contentID uint) (bool, error) {
+	return s.contentBookmarkRepo.Exists(userID, contentID)
+}
+
+// UserCanViewContent 用户是否可观看该内容（已购买或有效会员）
+func (s *contentService) UserCanViewContent(userID uint, contentID uint) (bool, error) {
+	if userID == 0 {
+		return false, nil
+	}
+	purchased, err := s.purchaseRepo.HasUserPurchasedContent(userID, contentID)
+	if err != nil {
+		return false, err
+	}
+	if purchased {
+		return true, nil
+	}
+	membership, err := s.purchaseRepo.GetLatestActiveMembership(userID)
+	if err != nil || membership == nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// ListBookmarkedContent 返回当前用户书签的内容列表（Bookmarks 页）
+func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) ([]ListFeedItem, error) {
+	if userID == 0 {
+		return nil, nil
+	}
+	contentIDs, err := s.contentBookmarkRepo.ListContentIDsByUserID(userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ListFeedItem, 0, len(contentIDs))
+	for _, cid := range contentIDs {
+		c, err := s.contentRepo.GetByID(cid)
+		if err != nil || !c.IsReady() {
+			continue
+		}
+		authorUsername, _ := s.GetAuthorForUserID(c.UploadedBy)
+		if authorUsername == "" {
+			authorUsername = c.Name
+		}
+		files, err := s.fileRepo.GetByContentID(c.ID)
+		if err != nil || len(files) == 0 {
+			out = append(out, ListFeedItem{
+				ID:             c.ID,
+				Name:           c.Name,
+				Description:    c.Description,
+				Category:       string(c.Category),
+				Price:          c.Price,
+				CreatedAt:      c.CreatedAt.Format(time.RFC3339),
+				AuthorUsername: authorUsername,
+				Bookmarked:     true,
+			})
+			continue
+		}
+		first := files[0]
+		purchased, _ := s.UserCanViewContent(userID, c.ID)
+		out = append(out, ListFeedItem{
+			ID:             c.ID,
+			Name:           c.Name,
+			Description:    c.Description,
+			Category:       string(c.Category),
+			Price:          c.Price,
+			PreviewGifURL:  first.GifFileURL,
+			FirstFileID:    first.ID,
+			Purchased:      purchased,
+			Bookmarked:     true,
+			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
+			AuthorUsername: authorUsername,
+		})
+	}
+	return out, nil
+}
+
+// GetGifPreview 返回 GIF 预览：已购买则流式返回原图；未购买则从 S3 取 GIF、模糊后返回 GIF
+func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser, string, error) {
+	file, err := s.fileRepo.GetByID(fileID)
+	if err != nil {
+		return nil, "", fmt.Errorf("file not found: %w", err)
+	}
+	if file.GifFilePath == "" {
+		return nil, "", fmt.Errorf("no gif for file %d", fileID)
+	}
+	content, err := s.contentRepo.GetByID(file.ContentID)
+	if err != nil {
+		return nil, "", fmt.Errorf("content not found: %w", err)
+	}
+	canView := false
+	if userID > 0 {
+		canView, _ = s.UserCanViewContent(userID, content.ID)
+	}
+	if canView {
+		reader, contentType, err := s.s3Service.StreamFile("", file.GifFilePath)
+		if err != nil {
+			return nil, "", err
+		}
+		if contentType == "" {
+			contentType = "image/gif"
+		}
+		return reader, contentType, nil
+	}
+	blurred, err := s.getGifBlurredGIF(file.GifFilePath)
+	if err != nil {
+		return nil, "", err
+	}
+	return io.NopCloser(bytes.NewReader(blurred)), "image/gif", nil
+}
+
+// getGifBlurredGIF 从 S3 拉取 GIF，逐帧模糊后编码为完整多帧 GIF（保留延迟与循环）
+func (s *contentService) getGifBlurredGIF(gifS3Key string) ([]byte, error) {
+	reader, _, err := s.s3Service.StreamFile("", gifS3Key)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	img, err := gif.DecodeAll(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode gif: %w", err)
+	}
+	if len(img.Image) == 0 {
+		return nil, fmt.Errorf("empty gif")
+	}
+
+	blurredFrames := make([]*image.Paletted, 0, len(img.Image))
+	for i := range img.Image {
+		frame := img.Image[i]
+		blurred := imaging.Blur(imaging.Clone(frame), 5)
+		dst := image.NewPaletted(blurred.Bounds(), frame.Palette)
+		draw.FloydSteinberg.Draw(dst, dst.Bounds(), blurred, image.Point{})
+		blurredFrames = append(blurredFrames, dst)
+	}
+
+	out := &gif.GIF{
+		Image:           blurredFrames,
+		Delay:           img.Delay,
+		Disposal:        img.Disposal,
+		LoopCount:       img.LoopCount,
+		Config:          img.Config,
+		BackgroundIndex: img.BackgroundIndex,
+	}
+	if len(img.Delay) < len(blurredFrames) {
+		out.Delay = make([]int, len(blurredFrames))
+		for i := range out.Delay {
+			if i < len(img.Delay) {
+				out.Delay[i] = img.Delay[i]
+			} else {
+				out.Delay[i] = img.Delay[len(img.Delay)-1]
+			}
+		}
+	}
+	if len(img.Disposal) < len(blurredFrames) {
+		out.Disposal = make([]byte, len(blurredFrames))
+		for i := range out.Disposal {
+			if i < len(img.Disposal) {
+				out.Disposal[i] = img.Disposal[i]
+			} else {
+				out.Disposal[i] = img.Disposal[len(img.Disposal)-1]
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := gif.EncodeAll(&buf, out); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

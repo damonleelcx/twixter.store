@@ -9,7 +9,7 @@ metadata:
     app: twixter-backend
   annotations:
     # minikube 使用 nginx ingress
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100gb"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
 spec:

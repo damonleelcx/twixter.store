@@ -1,28 +1,27 @@
 import { LeftSidebar } from "@/components/LeftSidebar";
-import { MainFeedWithTabs } from "@/components/MainFeedWithTabs";
+import { BookmarksList } from "@/components/BookmarksList";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebar } from "@/components/RightSidebar";
-import { fetchContentFeedServer } from "@/lib/api";
-import { setRequestLocale } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
 type Props = {
   params: Promise<{ locale: string }>;
 };
 
-export default async function Home({ params }: Props) {
+export default async function BookmarksPage({ params }: Props) {
   const { locale } = await params;
   setRequestLocale(locale);
-
-  const initialForYouFeed = await fetchContentFeedServer("light", 0, 20).catch(
-    () => ({ items: [], next_cursor: 0, has_more: false })
-  );
+  const t = await getTranslations("nav");
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <div className="mx-auto flex max-w-[1280px]">
         <LeftSidebar locale={locale} />
         <main className="min-w-0 flex-1 border-x border-[var(--border)] md:max-w-[600px]">
-          <MainFeedWithTabs initialForYouFeed={initialForYouFeed} />
+          <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] px-4 py-3">
+            <h1 className="text-xl font-semibold">{t("bookmarks")}</h1>
+          </header>
+          <BookmarksList />
         </main>
         <RightSidebar />
       </div>

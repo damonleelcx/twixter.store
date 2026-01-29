@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -13,6 +14,9 @@ import (
 type VideoProcessingService interface {
 	// GenerateGif 从视频生成GIF
 	GenerateGif(videoPath, outputPath string, startTime float64, duration float64) error
+
+	// GenerateGifSampled 从整段视频中均匀采样 numFrames 帧生成GIF
+	GenerateGifSampled(videoPath, outputPath string, duration float64, numFrames int) error
 
 	// TranscodeVideo 转码视频为HLS格式（.m3u8 + .ts 分片）
 	TranscodeVideo(inputPath, outputDir, outputName string, options *TranscodeOptions) (*HLSOutput, error)
@@ -90,6 +94,11 @@ func NewVideoProcessingService() (VideoProcessingService, error) {
 	}, nil
 }
 
+// toFFmpegPath 将路径转为 FFmpeg 可识别的形式（Windows 下反斜杠改为正斜杠，避免打开失败）
+func toFFmpegPath(p string) string {
+	return strings.ReplaceAll(p, "\\", "/")
+}
+
 // GenerateGif 从视频生成GIF
 func (v *videoProcessingService) GenerateGif(videoPath, outputPath string, startTime float64, duration float64) error {
 	// 确保输出目录存在
@@ -134,6 +143,50 @@ func (v *videoProcessingService) GenerateGif(videoPath, outputPath string, start
 	return nil
 }
 
+// GenerateGifSampled 从整段视频中均匀采样 numFrames 帧生成GIF（全片时长内等间隔取帧）
+// 使用单条 FFmpeg filter_complex，不写调色板文件，避免 Windows 下调色板文件未创建问题
+func (v *videoProcessingService) GenerateGifSampled(videoPath, outputPath string, duration float64, numFrames int) error {
+	if duration <= 0 || numFrames <= 0 {
+		return fmt.Errorf("duration and numFrames must be positive")
+	}
+	outDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+	outputPath, _ = filepath.Abs(outputPath)
+	videoPath, _ = filepath.Abs(videoPath)
+
+	// 采样率：numFrames 帧 / duration 秒；fps 至少 1 避免 “No filtered frames”（极低 fps 时 filter 无输出）
+	fpsVal := float64(numFrames) / duration
+	if fpsVal < 1 {
+		fpsVal = 1
+	}
+	fpsArg := fmt.Sprintf("%.4f", fpsVal)
+	// 单命令：split -> 一路 palettegen，一路 scale -> paletteuse，直接输出 GIF
+	filterComplex := fmt.Sprintf("split[s0][s1];[s0]fps=%s,scale=320:-1:flags=lanczos,palettegen=stats_mode=single[p];[s1]fps=%s,scale=320:-1:flags=lanczos[x];[x][p]paletteuse=new=1", fpsArg, fpsArg)
+
+	cmd := exec.Command(v.ffmpegPath,
+		"-t", fmt.Sprintf("%.2f", duration),
+		"-i", videoPath,
+		"-filter_complex", filterComplex,
+		"-y",
+		outputPath,
+	)
+	stderr := &bytes.Buffer{}
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		msg := err.Error()
+		if stderr.Len() > 0 {
+			msg = strings.TrimSpace(stderr.String())
+			if len(msg) > 1500 {
+				msg = "... " + msg[len(msg)-1500:]
+			}
+		}
+		return fmt.Errorf("failed to generate GIF: %w (ffmpeg: %s)", err, msg)
+	}
+	return nil
+}
+
 // TranscodeVideo 转码视频为HLS格式（.m3u8 + .ts 分片）
 func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName string, options *TranscodeOptions) (*HLSOutput, error) {
 	// 确保输出目录存在
@@ -148,7 +201,7 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 			Bitrate:    "2000k",
 			Resolution: "1920x1080", // 默认转码到 1080p
 			Format:     "hls",
-			Quality:    "medium",
+			Quality:    "high",
 		}
 	}
 
@@ -173,14 +226,12 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 		args = append(args, "-b:v", options.Bitrate)
 	}
 
-	// 总是添加分辨率缩放（保持宽高比）
+	// 总是添加分辨率缩放（保持宽高比）；使用 -2 保证宽高为偶数（libx264 要求）
 	resolutionParts := strings.Split(options.Resolution, "x")
 	if len(resolutionParts) == 2 {
-		// 使用 scale=width:-1 保持宽高比
-		args = append(args, "-vf", fmt.Sprintf("scale=%s:-1", resolutionParts[0]))
+		args = append(args, "-vf", fmt.Sprintf("scale=%s:-2", resolutionParts[0]))
 	} else {
-		// 如果格式不正确，使用默认值
-		args = append(args, "-vf", "scale=1920:-1")
+		args = append(args, "-vf", "scale=1920:-2")
 	}
 
 	// 音频编码
@@ -197,9 +248,19 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 	)
 
 	cmd := exec.Command(v.ffmpegPath, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	// 运行转码命令
 	if err := cmd.Run(); err != nil {
+		if stderr.Len() > 0 {
+			ffmpegErr := strings.TrimSpace(stderr.String())
+			// 取末尾一段（错误信息通常在 stderr 末尾，前面是 version banner）
+			if len(ffmpegErr) > 1500 {
+				ffmpegErr = "... " + ffmpegErr[len(ffmpegErr)-1500:]
+			}
+			return nil, fmt.Errorf("failed to transcode video to HLS: %w (ffmpeg: %s)", err, ffmpegErr)
+		}
 		return nil, fmt.Errorf("failed to transcode video to HLS: %w", err)
 	}
 

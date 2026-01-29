@@ -33,6 +33,10 @@ services:
       # Stripe payment configuration
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      # PayPal (backup payment): optional
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID:-}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET:-}
+      - PAYPAL_MODE=${PAYPAL_MODE:-sandbox}
       # Frontend URL (for Stripe Checkout return URLs)
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       # 容器内使用镜像内 FFmpeg，不读 .env 的 Windows 路径

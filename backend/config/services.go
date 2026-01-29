@@ -19,6 +19,7 @@ type Services struct {
 	ContentService  service.ContentService
 	PurchaseService service.PurchaseService
 	StripeService   service.StripeService
+	PayPalService   service.PayPalService
 }
 
 // Controllers 包含所有初始化的控制器
@@ -39,6 +40,7 @@ type Repositories struct {
 	ContentFileRepo    repository.ContentFileRepository
 	TagRepo            repository.TagRepository
 	ContentTagRepo     repository.ContentTagRepository
+	ContentBookmarkRepo repository.ContentBookmarkRepository
 	AnalyticsRepo      repository.AnalyticsRepository
 }
 
@@ -53,8 +55,9 @@ func InitRepositories(db *gorm.DB) *Repositories {
 		ContentRepo:        repository.NewContentRepository(db),
 		ContentFileRepo:    repository.NewContentFileRepository(db),
 		TagRepo:            repository.NewTagRepository(db),
-		ContentTagRepo:     repository.NewContentTagRepository(db),
-		AnalyticsRepo:      repository.NewAnalyticsRepository(db),
+		ContentTagRepo:      repository.NewContentTagRepository(db),
+		ContentBookmarkRepo: repository.NewContentBookmarkRepository(db),
+		AnalyticsRepo:       repository.NewAnalyticsRepository(db),
 	}
 }
 
@@ -95,7 +98,10 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 			repos.ContentFileRepo,
 			repos.TagRepo,
 			repos.ContentTagRepo,
+			repos.ContentBookmarkRepo,
 			repos.AnalyticsRepo,
+			repos.PurchaseRepo,
+			repos.UserRepo,
 			s3Service,
 			kafkaService,
 		)
@@ -110,10 +116,20 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 		services.StripeService = stripeService
 	}
 
-	// 初始化购买服务（如果 Stripe 可用）
+	// 初始化 PayPal 服务（可选，备用支付）
+	paypalService, err := service.NewPayPalService()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize PayPal service: %v. PayPal payment will not work.", err)
+		paypalService = nil
+	} else {
+		services.PayPalService = paypalService
+	}
+
+	// 初始化购买服务（需要至少 Stripe 或 PayPal 之一；当前以 Stripe 为主）
 	if stripeService != nil {
 		services.PurchaseService = service.NewPurchaseService(
 			stripeService,
+			paypalService,
 			repos.PurchaseRepo,
 			repos.ContentRepo,
 			repos.WalletRepo,
@@ -146,7 +162,7 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 }
 
 // InitControllers 初始化所有控制器
-func InitControllers(services *Services) *Controllers {
+func InitControllers(services *Services, repos *Repositories) *Controllers {
 	controllers := &Controllers{}
 
 	// 初始化认证控制器（必需）
@@ -154,7 +170,7 @@ func InitControllers(services *Services) *Controllers {
 
 	// 初始化内容控制器（如果内容服务可用）
 	if services.ContentService != nil {
-		controllers.ContentController = controller.NewContentController(services.ContentService)
+		controllers.ContentController = controller.NewContentController(services.ContentService, repos.UserPermissionRepo, repos.PurchaseRepo)
 	}
 
 	// 初始化购买控制器（如果购买服务和 Stripe 服务可用）
@@ -173,8 +189,8 @@ func InitMiddleware(redisClient *redis.Client) *middleware.CacheMiddleware {
 	// 初始化 Redis 限流器
 	middleware.DefaultRateLimiter = middleware.NewRedisRateLimiter(redisClient, 100, 1*time.Minute)
 	middleware.StrictRateLimiter = middleware.NewRedisRateLimiter(redisClient, 10, 1*time.Minute)
-	middleware.AuthRateLimiter = middleware.NewRedisRateLimiter(redisClient, 5, 1*time.Minute)
-	middleware.RefreshRateLimiter = middleware.NewRedisRateLimiter(redisClient, 30, 1*time.Minute)
+	middleware.AuthRateLimiter = middleware.NewRedisRateLimiter(redisClient, 20, 1*time.Minute)
+	middleware.RefreshRateLimiter = middleware.NewRedisRateLimiter(redisClient, 60, 1*time.Minute)
 
 	// 初始化 Redis 缓存中间件
 	cacheMiddleware := middleware.NewCacheMiddleware(redisClient, "api_cache:", 5*time.Minute)

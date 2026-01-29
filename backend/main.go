@@ -60,7 +60,7 @@ func main() {
 	}
 
 	// 初始化 controllers
-	controllers := config.InitControllers(services)
+	controllers := config.InitControllers(services, repos)
 
 	// 设置路由
 	router := routes.SetupRouter(db, services, controllers, repos, cacheMiddleware, sentryDSN)

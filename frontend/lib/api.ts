@@ -1,5 +1,8 @@
 const AUTH_TOKEN_KEY = "twixter_access_token";
 const REFRESH_TOKEN_KEY = "twixter_refresh_token";
+/** Cookie name for access token (used for SSR; set when client stores token). */
+export const AUTH_TOKEN_COOKIE = "twixter_token";
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 /** Prefer relative /api so Next.js rewrites proxy to backend; set NEXT_PUBLIC_API_URL for direct backend URL (e.g. production). */
 export function getApiBase(): string {
@@ -24,6 +27,7 @@ export function getAccessToken(): string | null {
 export function setAccessToken(token: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(AUTH_TOKEN_KEY, token);
+  document.cookie = `${AUTH_TOKEN_COOKIE}=${encodeURIComponent(token)}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
 }
 
 export function getRefreshToken(): string | null {
@@ -50,6 +54,9 @@ export function clearRefreshToken(): void {
 export function clearTokens(): void {
   clearAccessToken();
   clearRefreshToken();
+  if (typeof window !== "undefined") {
+    document.cookie = `${AUTH_TOKEN_COOKIE}=; path=/; max-age=0`;
+  }
 }
 
 export function getAuthHeaders(): HeadersInit {
@@ -263,6 +270,66 @@ export async function createMembershipCheckout(months: 1 | 3 | 9): Promise<{
   return data;
 }
 
+/** Create PayPal order for membership (backup payment). months: 1, 3, or 9. Returns PayPal order id. */
+export async function createPayPalMembershipOrder(months: 1 | 3 | 9): Promise<{ id: string }> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/purchase/membership/paypal/order`, {
+    method: "POST",
+    body: JSON.stringify({ months }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(authErrorFromResponse(data, "PayPal order failed"));
+  return data;
+}
+
+/** Create PayPal order for credits (backup payment). Returns PayPal order id. */
+export async function createPayPalCreditsOrder(amount: number, credits: number): Promise<{ id: string }> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/purchase/credits/paypal/order`, {
+    method: "POST",
+    body: JSON.stringify({ amount, credits }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(authErrorFromResponse(data, "PayPal credits order failed"));
+  return data;
+}
+
+/** Error message substring indicating insufficient credits (redirect user to credits page). */
+export const INSUFFICIENT_CREDITS_KEY = "insufficient credits";
+
+/** Purchase content with credits. Requires auth. */
+export async function purchaseContent(contentId: number): Promise<{ message?: string }> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/purchase/content`, {
+    method: "POST",
+    body: JSON.stringify({ content_id: contentId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = authErrorFromResponse(data, "Purchase failed");
+    throw new Error(msg);
+  }
+  return data;
+}
+
+/** Returns true if the error is due to insufficient credits. */
+export function isInsufficientCreditsError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.toLowerCase().includes(INSUFFICIENT_CREDITS_KEY);
+}
+
+/** Capture PayPal order after buyer approval. Completes payment (membership or credits). */
+export async function capturePayPalOrder(orderID: string): Promise<{ status: string }> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/purchase/membership/paypal/capture`, {
+    method: "POST",
+    body: JSON.stringify({ orderID }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(authErrorFromResponse(data, "PayPal capture failed"));
+  return data;
+}
+
 /** Call backend logout to revoke current session. Safe to call even without token. */
 export async function authApiLogout(): Promise<void> {
   const base = getApiBase();
@@ -278,6 +345,227 @@ export async function authApiLogout(): Promise<void> {
 }
 
 export type TagOption = { id: number; name: string; slug: string };
+
+/** Content feed item from list API (author, timestamp, purchased, bookmarked, preview gif). */
+export type ContentFeedItem = {
+  id: number;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  preview_gif_url: string;
+  first_file_id: number;
+  purchased: boolean;
+  bookmarked?: boolean;
+  created_at: string;
+  author_username: string;
+  author_avatar?: string;
+};
+
+/** Content detail from GET /content/:id (with files, purchased, bookmarked, price, author). */
+export type ContentDetail = {
+  content: {
+    id: number;
+    name: string;
+    description: string;
+    type: string;
+    status: string;
+    category: string;
+    price: number;
+    created_at: string;
+    purchased: boolean;
+    bookmarked?: boolean;
+    author_username?: string;
+    author_avatar?: string;
+  };
+  files: Array<{
+    id: number;
+    file_name: string;
+    file_index: number;
+    original_file_url: string;
+    gif_file_url: string;
+    transcoded_file_url: string;
+    stage: string;
+    width?: number;
+    height?: number;
+    duration?: number;
+  }>;
+};
+
+/** Get content by id. Auth or viewing_dark cookie for dark. Optional viewing param for unauthenticated dark access. */
+export async function getContentById(id: number, viewingToken?: string | null): Promise<ContentDetail> {
+  const base = getApiBase();
+  const url = viewingToken ? `${base}/content/${id}?viewing=${encodeURIComponent(viewingToken)}` : `${base}/content/${id}`;
+  const res = await fetchWithAuth(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || data?.details || res.statusText || "Content not found");
+  }
+  return data as ContentDetail;
+}
+
+/** Server-only: get content by id with optional token and viewing param. Returns null on 404/401/error. */
+export async function getContentByIdServer(
+  id: number,
+  token: string | undefined,
+  viewingToken?: string | null
+): Promise<ContentDetail | null> {
+  const base = getServerApiBase();
+  if (!base) return null;
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  const url = viewingToken ? `${base}/content/${id}?viewing=${encodeURIComponent(viewingToken)}` : `${base}/content/${id}`;
+  const res = await fetch(url, { headers, cache: "no-store" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return null;
+  return data as ContentDetail;
+}
+
+/** Read access token from cookie string (for server: pass request cookies). */
+export function getAccessTokenFromCookie(cookieHeader: string | null): string | undefined {
+  if (!cookieHeader) return undefined;
+  const match = cookieHeader.match(new RegExp(`${AUTH_TOKEN_COOKIE}=([^;]+)`));
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1].trim());
+  } catch {
+    return undefined;
+  }
+}
+
+/** Response shape for content feed list (shared by client and server fetch). */
+export type ContentFeedResponse = {
+  items: ContentFeedItem[];
+  next_cursor: number;
+  has_more: boolean;
+};
+
+/** Fetch content feed by category. Optional auth (token sent when available). Dark requires can_view_nsfw. */
+export async function fetchContentFeed(
+  category: "light" | "dark",
+  cursor: number,
+  limit = 20
+): Promise<ContentFeedResponse> {
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    category,
+    cursor: String(cursor),
+    limit: String(limit),
+  });
+  const headers: HeadersInit = {};
+  const token = getAccessToken();
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}/content/list?${params}`, { headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
+  }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    next_cursor: typeof data?.next_cursor === "number" ? data.next_cursor : cursor + 1,
+    has_more: Boolean(data?.has_more),
+  };
+}
+
+/** Add bookmark for content. Requires auth. */
+export async function addBookmark(contentId: number): Promise<void> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/content/${contentId}/bookmark`, {
+    method: "POST",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Failed to add bookmark");
+}
+
+/** Remove bookmark for content. Requires auth. */
+export async function removeBookmark(contentId: number): Promise<void> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/content/${contentId}/bookmark`, {
+    method: "DELETE",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Failed to remove bookmark");
+}
+
+/** Fetch user's bookmarked content (Bookmarks page). Requires auth. */
+export async function fetchBookmarks(
+  cursor: number,
+  limit = 20
+): Promise<ContentFeedResponse> {
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    cursor: String(cursor),
+    limit: String(limit),
+  });
+  const res = await fetchWithAuth(`${base}/content/bookmarks?${params}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || data?.details || res.statusText || "Failed to load bookmarks");
+  }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    next_cursor: typeof data?.next_cursor === "number" ? data.next_cursor : cursor + 1,
+    has_more: Boolean(data?.has_more),
+  };
+}
+
+/** Fetch user's purchased content (Library). Requires auth. */
+export async function fetchLibraryContent(
+  cursor: number,
+  limit = 20
+): Promise<ContentFeedResponse> {
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    cursor: String(cursor),
+    limit: String(limit),
+  });
+  const res = await fetchWithAuth(`${base}/content/library?${params}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || data?.details || res.statusText || "Failed to load library");
+  }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    next_cursor: typeof data?.next_cursor === "number" ? data.next_cursor : cursor + 1,
+    has_more: Boolean(data?.has_more),
+  };
+}
+
+/** Server-only: base URL for API (absolute). Use in server components / server actions. */
+export function getServerApiBase(): string {
+  if (typeof window !== "undefined") return "";
+  const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const base = url.replace(/\/$/, "");
+  return base.startsWith("http") ? `${base}/api` : `http://${base}/api`;
+}
+
+/** Server-side fetch for content feed (no auth; for SSR initial "For you" feed). */
+export async function fetchContentFeedServer(
+  category: "light" | "dark",
+  cursor: number,
+  limit = 20
+): Promise<ContentFeedResponse> {
+  const base = getServerApiBase();
+  if (!base) return { items: [], next_cursor: 0, has_more: false };
+  const params = new URLSearchParams({
+    category,
+    cursor: String(cursor),
+    limit: String(limit),
+  });
+  const res = await fetch(`${base}/content/list?${params}`, {
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { items: [], next_cursor: 0, has_more: false };
+  }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    next_cursor: typeof data?.next_cursor === "number" ? data.next_cursor : cursor + 1,
+    has_more: Boolean(data?.has_more),
+  };
+}
 
 export async function searchTags(
   q: string,

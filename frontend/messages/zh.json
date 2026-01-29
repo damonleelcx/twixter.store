@@ -4,20 +4,34 @@
     "explore": "探索",
     "notifications": "通知",
     "messages": "私信",
+    "library": "我的内容",
     "bookmarks": "书签",
     "profile": "个人",
     "post": "发帖",
     "adminUpload": "管理员上传",
     "subscribe": "订阅"
   },
+  "library": {
+    "empty": "还没有购买的内容。",
+    "signInToView": "登录后查看你的内容库。",
+    "retry": "重试"
+  },
+  "bookmarks": {
+    "empty": "还没有书签。",
+    "signInToView": "登录后查看你的书签。",
+    "retry": "重试"
+  },
   "feed": {
     "home": "首页",
     "forYou": "为你推荐",
     "following": "关注",
+    "premiumContent": "高端内容",
     "composePlaceholder": "有什么新鲜事？",
     "post": "发帖",
     "loading": "加载中...",
-    "allCaughtUp": "已经到底了"
+    "allCaughtUp": "已经到底了",
+    "unlockToView": "购买后解锁",
+    "credits": "积分"
   },
   "compose": {
     "media": "媒体",
@@ -25,6 +39,7 @@
     "poll": "投票"
   },
   "sidebar": {
+    "premiumMember":"Premium 会员",
     "premiumTitle": "订阅 Premium",
     "premiumDescription": "订阅以解锁全部内容并支持平台。",
     "subscribe": "订阅",
@@ -55,7 +70,14 @@
     "like": "喜欢",
     "share": "分享",
     "bookmark": "书签",
-    "showReplies": "显示回复"
+    "showReplies": "显示回复",
+    "unlockToView": "购买后解锁",
+    "credits": "积分",
+    "purchase": "购买",
+    "purchasing": "购买中…",
+    "signInToPurchase": "登录后购买",
+    "signUpToView": "注册后观看",
+    "playVideo": "播放视频"
   },
   "auth": {
     "signIn": "登录",
@@ -108,7 +130,8 @@
     "payment": "支付",
     "processing": "处理中…",
     "payNow": "支付",
-    "backToPlans": "返回套餐"
+    "backToPlans": "返回套餐",
+    "orPayWithPayPal": "或使用其他方式支付"
   },
   "purchaseReturn": {
     "verifyingTitle": "正在验证支付...",
@@ -130,11 +153,16 @@
       "back": "返回首页",
       "loading": "正在验证权限...",
       "file": "视频文件",
+      "chooseFile": "选择文件",
+      "noFileChosen": "未选择文件",
       "name": "名称",
       "namePlaceholder": "视频名称",
       "description": "描述",
       "descriptionPlaceholder": "可选描述",
       "priceCredits": "价格（积分）",
+      "category": "分类",
+      "categoryLight": "普通（Light）",
+      "categoryDark": "成人（Dark / NSFW）",
       "tags": "标签",
       "tagsPlaceholder": "搜索或添加标签...",
       "video": "视频",

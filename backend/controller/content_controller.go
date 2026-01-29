@@ -3,6 +3,7 @@ package controller
 import (
 	"backend/entity"
 	"backend/middleware"
+	"backend/repository"
 	"backend/service"
 	"encoding/json"
 	"fmt"
@@ -15,13 +16,17 @@ import (
 
 // ContentController 内容控制器
 type ContentController struct {
-	contentService service.ContentService
+	contentService     service.ContentService
+	userPermissionRepo repository.UserPermissionRepository
+	purchaseRepo       repository.PurchaseRepository
 }
 
 // NewContentController 创建内容控制器实例
-func NewContentController(contentService service.ContentService) *ContentController {
+func NewContentController(contentService service.ContentService, userPermissionRepo repository.UserPermissionRepository, purchaseRepo repository.PurchaseRepository) *ContentController {
 	return &ContentController{
-		contentService: contentService,
+		contentService:     contentService,
+		userPermissionRepo: userPermissionRepo,
+		purchaseRepo:       purchaseRepo,
 	}
 }
 
@@ -192,15 +197,21 @@ func (cc *ContentController) UploadVideos(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Failure 403 {object} map[string]interface{}
 // @Failure 404 {object} map[string]interface{}
+// contentIDUri 用于绑定路径参数 :id
+type contentIDUri struct {
+	ID uint `uri:"id" binding:"required"`
+}
+
 // @Router /api/content/{id} [get]
 func (cc *ContentController) GetContent(c *gin.Context) {
-	var id uint
-	if err := c.ShouldBindUri(&id); err != nil {
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid content ID",
 		})
 		return
 	}
+	id := params.ID
 
 	content, err := cc.contentService.GetContent(id)
 	if err != nil {
@@ -237,18 +248,196 @@ func (cc *ContentController) GetContent(c *gin.Context) {
 		})
 	}
 
+	purchased := false
+	bookmarked := false
+	if user, exists := middleware.GetUserFromContext(c); exists {
+		purchased, _ = cc.contentService.UserCanViewContent(user.ID, content.ID)
+		bookmarked, _ = cc.contentService.IsBookmarked(user.ID, content.ID)
+	}
+
+	authorUsername, authorAvatar := cc.contentService.GetAuthorForUserID(content.UploadedBy)
+	if authorUsername == "" {
+		authorUsername = content.Name
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"content": gin.H{
-			"id":          content.ID,
-			"name":        content.Name,
-			"description": content.Description,
-			"type":        content.Type,
-			"status":      content.Status,
-			"category":    content.Category,
-			"created_at":  content.CreatedAt,
+			"id":              content.ID,
+			"name":            content.Name,
+			"description":     content.Description,
+			"type":            content.Type,
+			"status":          content.Status,
+			"category":        content.Category,
+			"price":           content.Price,
+			"created_at":      content.CreatedAt,
+			"purchased":       purchased,
+			"bookmarked":      bookmarked,
+			"author_username": authorUsername,
+			"author_avatar":   authorAvatar,
 		},
 		"files": fileResponses,
 	})
+}
+
+// ListContent 分页列出 feed 内容（按分类）。dark 分类由 RequireNSFWPermissionForDarkList 中间件校验。
+func (cc *ContentController) ListContent(c *gin.Context) {
+	category := c.DefaultQuery("category", "light")
+	if category != "light" && category != "dark" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "category must be light or dark",
+		})
+		return
+	}
+	cursor, _ := strconv.Atoi(c.DefaultQuery("cursor", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	offset := cursor * limit
+	userID := uint(0)
+	if user, exists := middleware.GetUserFromContext(c); exists {
+		userID = user.ID
+	}
+	items, err := cc.contentService.ListFeed(category, userID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to list content",
+			"details": err.Error(),
+		})
+		return
+	}
+	nextCursor := cursor + 1
+	hasMore := len(items) == limit
+	c.JSON(http.StatusOK, gin.H{
+		"items":       items,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
+	})
+}
+
+// ListLibrary 获取当前用户已购买的内容列表（Library 页）
+func (cc *ContentController) ListLibrary(c *gin.Context) {
+	user, exists := middleware.GetUserFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	cursor, _ := strconv.Atoi(c.DefaultQuery("cursor", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	offset := cursor * limit
+	items, err := cc.contentService.ListPurchasedContent(user.ID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to list library",
+			"details": err.Error(),
+		})
+		return
+	}
+	nextCursor := cursor + 1
+	hasMore := len(items) == limit
+	c.JSON(http.StatusOK, gin.H{
+		"items":       items,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
+	})
+}
+
+// AddBookmark 添加书签
+func (cc *ContentController) AddBookmark(c *gin.Context) {
+	user, exists := middleware.GetUserFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid content ID"})
+		return
+	}
+	if err := cc.contentService.AddBookmark(user.ID, params.ID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Bookmarked"})
+}
+
+// RemoveBookmark 移除书签
+func (cc *ContentController) RemoveBookmark(c *gin.Context) {
+	user, exists := middleware.GetUserFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid content ID"})
+		return
+	}
+	if err := cc.contentService.RemoveBookmark(user.ID, params.ID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Removed"})
+}
+
+// ListBookmarks 获取当前用户书签的内容列表（Bookmarks 页）
+func (cc *ContentController) ListBookmarks(c *gin.Context) {
+	user, exists := middleware.GetUserFromContext(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	cursor, _ := strconv.Atoi(c.DefaultQuery("cursor", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	offset := cursor * limit
+	items, err := cc.contentService.ListBookmarkedContent(user.ID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to list bookmarks",
+			"details": err.Error(),
+		})
+		return
+	}
+	nextCursor := cursor + 1
+	hasMore := len(items) == limit
+	c.JSON(http.StatusOK, gin.H{
+		"items":       items,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
+	})
+}
+
+// StreamGifPreview 流式返回 GIF 预览：已购买返回原图，未购买返回后端模糊后的 JPEG
+func (cc *ContentController) StreamGifPreview(c *gin.Context) {
+	fileIDStr := c.Param("file_id")
+	fileID, err := strconv.ParseUint(fileIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid file ID",
+		})
+		return
+	}
+	userID := uint(0)
+	if user, exists := middleware.GetUserFromContext(c); exists {
+		userID = user.ID
+	}
+	reader, contentType, err := cc.contentService.GetGifPreview(uint(fileID), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Preview not found",
+		})
+		return
+	}
+	defer reader.Close()
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "private, max-age=300")
+	c.DataFromReader(http.StatusOK, -1, contentType, reader, nil)
 }
 
 // StreamTranscodedFile 流式传输转码文件（HLS .m3u8 播放列表）
@@ -278,6 +467,18 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Transcoded file not found",
 		})
+		return
+	}
+
+	// 仅已购买或有效会员可观看视频流
+	user, hasUser := middleware.GetUserFromContext(c)
+	if !hasUser {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	canView, err := cc.contentService.UserCanViewContent(user.ID, file.ContentID)
+	if err != nil || !canView {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
 		return
 	}
 
@@ -341,25 +542,26 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 // @Failure 401 {object} map[string]interface{}
 // @Router /api/content/{id}/view [post]
 func (cc *ContentController) RecordContentView(c *gin.Context) {
-	// 获取当前用户
-	user, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "Unauthorized",
-		})
-		return
-	}
-
-	userBase := user.(*entity.UserBase)
-
 	// 获取内容ID
-	var id uint
-	if err := c.ShouldBindUri(&id); err != nil {
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid content ID",
 		})
 		return
 	}
+	id := params.ID
+
+	// 未登录（仅凭 viewing cookie 访问）时不记录观看，直接返回成功
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "View recorded successfully",
+		})
+		return
+	}
+
+	userBase := user.(*entity.UserBase)
 
 	// 记录观看
 	if err := cc.contentService.RecordView(id, userBase.ID); err != nil {
@@ -395,13 +597,14 @@ func (cc *ContentController) RecordContentView(c *gin.Context) {
 // @Router /api/content/{id}/analytics [get]
 func (cc *ContentController) GetContentAnalytics(c *gin.Context) {
 	// 获取内容ID
-	var id uint
-	if err := c.ShouldBindUri(&id); err != nil {
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid content ID",
 		})
 		return
 	}
+	id := params.ID
 
 	// 获取日期范围参数
 	startDate := c.DefaultQuery("start_date", "")

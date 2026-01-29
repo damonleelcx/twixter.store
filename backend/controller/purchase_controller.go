@@ -99,10 +99,136 @@ func (pc *PurchaseController) CreateMembershipCheckout(c *gin.Context) {
 	})
 }
 
+// CreatePayPalMembershipOrder 创建会员购买 PayPal 订单（备用支付）
+// @Summary Create PayPal order for membership
+// @Description Create a PayPal order for membership purchase (backup payment)
+// @Tags purchase
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body CreateMembershipCheckoutRequest true "Months: 1, 3, or 9"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 503 {object} map[string]interface{}
+// @Router /api/purchase/membership/paypal/order [post]
+func (pc *PurchaseController) CreatePayPalMembershipOrder(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userBase := user.(*entity.UserBase)
+
+	var req CreateMembershipCheckoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data", "details": err.Error()})
+		return
+	}
+	if req.Months != 1 && req.Months != 3 && req.Months != 9 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "months must be 1, 3, or 9"})
+		return
+	}
+
+	orderID, err := pc.purchaseService.CreateMembershipCheckoutPayPal(userBase.ID, req.Months)
+	if err != nil {
+		if err.Error() == "PayPal is not configured" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "PayPal is not configured"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create PayPal order", "details": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": orderID})
+}
+
+// CapturePayPalOrderRequest 捕获 PayPal 订单请求
+type CapturePayPalOrderRequest struct {
+	OrderID string `json:"orderID" binding:"required"`
+}
+
+// CapturePayPalOrder 捕获 PayPal 订单完成支付
+// @Summary Capture PayPal order
+// @Description Capture the PayPal order to complete payment and grant membership
+// @Tags purchase
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body CapturePayPalOrderRequest true "PayPal order ID"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 503 {object} map[string]interface{}
+// @Router /api/purchase/membership/paypal/capture [post]
+func (pc *PurchaseController) CapturePayPalOrder(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userBase := user.(*entity.UserBase)
+
+	var req CapturePayPalOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data", "details": err.Error()})
+		return
+	}
+
+	if err := pc.purchaseService.HandlePayPalCapture(req.OrderID, userBase.ID); err != nil {
+		if err.Error() == "PayPal is not configured" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "PayPal is not configured"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to capture PayPal order", "details": err.Error()})
+		return
+	}
+	if middleware.GlobalCacheMiddleware != nil {
+		userBase := user.(*entity.UserBase)
+		_ = middleware.GlobalCacheMiddleware.InvalidateUserCache(userBase.ID)
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "completed"})
+}
+
 // CreateCreditsCheckoutRequest 创建积分购买结账请求
 type CreateCreditsCheckoutRequest struct {
 	Amount  float64 `json:"amount" binding:"required,gt=0"`  // 支付金额（美元）
 	Credits int64   `json:"credits" binding:"required,gt=0"` // 购买的积分数量
+}
+
+// CreatePayPalCreditsOrder 创建积分购买 PayPal 订单（备用支付）
+// @Summary Create PayPal order for credits
+// @Description Create a PayPal order for credits purchase (backup payment)
+// @Tags purchase
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param request body CreateCreditsCheckoutRequest true "Amount and credits"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 503 {object} map[string]interface{}
+// @Router /api/purchase/credits/paypal/order [post]
+func (pc *PurchaseController) CreatePayPalCreditsOrder(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userBase := user.(*entity.UserBase)
+
+	var req CreateCreditsCheckoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data", "details": err.Error()})
+		return
+	}
+
+	orderID, err := pc.purchaseService.CreateCreditsCheckoutPayPal(userBase.ID, req.Amount, req.Credits)
+	if err != nil {
+		if err.Error() == "PayPal is not configured" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "PayPal is not configured"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create PayPal order", "details": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": orderID})
 }
 
 // CreateCreditsCheckout 创建积分购买结账会话

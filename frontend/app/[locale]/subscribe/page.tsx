@@ -3,7 +3,14 @@
 import { LeftSidebar } from "@/components/LeftSidebar";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebar } from "@/components/RightSidebar";
-import { createMembershipCheckout, fetchCurrentUser, type CurrentUser } from "@/lib/api";
+import {
+  capturePayPalOrder,
+  createMembershipCheckout,
+  createPayPalMembershipOrder,
+  fetchCurrentUser,
+  type CurrentUser,
+} from "@/lib/api";
+import { PayPalButtons, PayPalScriptProvider } from "@paypal/react-paypal-js";
 import {
   CheckoutProvider,
   PaymentElement,
@@ -24,13 +31,16 @@ const MEMBERSHIP_PLANS: { months: 1 | 3 | 9; price: number; labelKey: string }[]
 
 const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
+const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "";
 
 function MembershipCheckoutForm({
   locale,
   userEmail,
+  selectedMonths,
 }: {
   locale: string;
   userEmail: string | null;
+  selectedMonths: 1 | 3 | 9;
 }) {
   const router = useRouter();
   const t = useTranslations("auth");
@@ -85,22 +95,55 @@ function MembershipCheckoutForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <h4 className="font-bold">{t("payment")}</h4>
-      <PaymentElement id="payment-element" />
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="w-full rounded-full bg-[var(--accent)] py-3 font-bold text-[var(--accent-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
-      >
-        {isSubmitting ? t("processing") : amountDisplay ? `${t("payNow")} ${amountDisplay}` : t("payNow")}
-      </button>
-      {message && (
-        <p className="text-sm text-red-600 dark:text-red-400" id="payment-message">
-          {message}
-        </p>
+    <div className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <h4 className="font-bold">{t("payment")}</h4>
+        <PaymentElement id="payment-element" />
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full rounded-full bg-[var(--accent)] py-3 font-bold text-[var(--accent-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {isSubmitting ? t("processing") : amountDisplay ? `${t("payNow")} ${amountDisplay}` : t("payNow")}
+        </button>
+        {message && (
+          <p className="text-sm text-red-600 dark:text-red-400" id="payment-message">
+            {message}
+          </p>
+        )}
+      </form>
+
+      {paypalClientId && (
+        <div className="space-y-2">
+          <p className="text-sm text-[var(--muted)]">{t("orPayWithPayPal")}</p>
+          <PayPalScriptProvider
+            options={{
+              clientId: paypalClientId,
+              currency: "USD",
+              intent: "capture",
+              components: "buttons",
+            }}
+          >
+            <PayPalButtons
+              style={{ layout: "vertical", color: "gold", label: "paypal" }}
+              createOrder={async () => {
+                const { id } = await createPayPalMembershipOrder(selectedMonths);
+                return id;
+              }}
+              onApprove={async (data) => {
+                try {
+                  await capturePayPalOrder(data.orderID ?? "");
+                  router.push(`/${locale}/purchase/return`);
+                  router.refresh();
+                } catch (err) {
+                  console.error("PayPal capture failed:", err);
+                }
+              }}
+            />
+          </PayPalScriptProvider>
+        </div>
       )}
-    </form>
+    </div>
   );
 }
 
@@ -113,6 +156,7 @@ export default function SubscribePage() {
   const tSidebar = useTranslations("sidebar");
   const [user, setUser] = useState<CurrentUser | null | undefined>(undefined);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [selectedMonths, setSelectedMonths] = useState<1 | 3 | 9 | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -132,6 +176,7 @@ export default function SubscribePage() {
       return;
     }
     setError("");
+    setSelectedMonths(months);
     setLoading(true);
     try {
       const data = await createMembershipCheckout(months);
@@ -179,7 +224,7 @@ export default function SubscribePage() {
             <div className="mb-4">
               <button
                 type="button"
-                onClick={() => setClientSecret(null)}
+                onClick={() => { setClientSecret(null); setSelectedMonths(null); }}
                 className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
               >
                 ← {t("backToPlans")}
@@ -192,7 +237,11 @@ export default function SubscribePage() {
                 elementsOptions: { appearance },
               }}
             >
-              <MembershipCheckoutForm locale={locale} userEmail={user.email ?? null} />
+              <MembershipCheckoutForm
+                locale={locale}
+                userEmail={user.email ?? null}
+                selectedMonths={selectedMonths ?? 1}
+              />
             </CheckoutProvider>
           </main>
           <RightSidebar />

@@ -3,7 +3,14 @@
 import { LeftSidebar } from "@/components/LeftSidebar";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebar } from "@/components/RightSidebar";
-import { createCreditsCheckout, fetchCurrentUser, type CurrentUser } from "@/lib/api";
+import {
+  capturePayPalOrder,
+  createCreditsCheckout,
+  createPayPalCreditsOrder,
+  fetchCurrentUser,
+  type CurrentUser,
+} from "@/lib/api";
+import { PayPalButtons, PayPalScriptProvider } from "@paypal/react-paypal-js";
 import {
   CheckoutProvider,
   PaymentElement,
@@ -26,13 +33,18 @@ const CREDIT_PACKAGES = [
 
 const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
 const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
+const paypalClientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || "";
 
 function CreditsCheckoutForm({
   locale,
   userEmail,
+  selectedAmount,
+  selectedCredits,
 }: {
   locale: string;
   userEmail: string | null;
+  selectedAmount: number;
+  selectedCredits: number;
 }) {
   const router = useRouter();
   const t = useTranslations("auth");
@@ -89,22 +101,55 @@ function CreditsCheckoutForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <h4 className="font-bold">Payment</h4>
-      <PaymentElement id="payment-element" />
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="w-full rounded-full bg-[var(--accent)] py-3 font-bold text-[var(--accent-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
-      >
-        {isSubmitting ? "Processing…" : amountDisplay ? `Pay ${amountDisplay} now` : "Pay now"}
-      </button>
-      {message && (
-        <p className="text-sm text-red-600 dark:text-red-400" id="payment-message">
-          {message}
-        </p>
+    <div className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <h4 className="font-bold">Payment</h4>
+        <PaymentElement id="payment-element" />
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full rounded-full bg-[var(--accent)] py-3 font-bold text-[var(--accent-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {isSubmitting ? "Processing…" : amountDisplay ? `Pay ${amountDisplay} now` : "Pay now"}
+        </button>
+        {message && (
+          <p className="text-sm text-red-600 dark:text-red-400" id="payment-message">
+            {message}
+          </p>
+        )}
+      </form>
+
+      {paypalClientId && (
+        <div className="space-y-2">
+          <p className="text-sm text-[var(--muted)]">{t("orPayWithPayPal")}</p>
+          <PayPalScriptProvider
+            options={{
+              clientId: paypalClientId,
+              currency: "USD",
+              intent: "capture",
+              components: "buttons",
+            }}
+          >
+            <PayPalButtons
+              style={{ layout: "vertical", color: "gold", label: "paypal" }}
+              createOrder={async () => {
+                const { id } = await createPayPalCreditsOrder(selectedAmount, selectedCredits);
+                return id;
+              }}
+              onApprove={async (data) => {
+                try {
+                  await capturePayPalOrder(data.orderID ?? "");
+                  router.push(`/${locale}/purchase/return`);
+                  router.refresh();
+                } catch (err) {
+                  console.error("PayPal capture failed:", err);
+                }
+              }}
+            />
+          </PayPalScriptProvider>
+        </div>
       )}
-    </form>
+    </div>
   );
 }
 
@@ -116,6 +161,7 @@ export default function CreditsPage() {
   const tNav = useTranslations("nav");
   const [user, setUser] = useState<CurrentUser | null | undefined>(undefined);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<{ amount: number; credits: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -135,6 +181,7 @@ export default function CreditsPage() {
       return;
     }
     setError("");
+    setSelectedPackage({ amount, credits });
     setLoading(true);
     try {
       const data = await createCreditsCheckout(amount, credits);
@@ -182,7 +229,7 @@ export default function CreditsPage() {
             <div className="mb-4">
               <button
                 type="button"
-                onClick={() => setClientSecret(null)}
+                onClick={() => { setClientSecret(null); setSelectedPackage(null); }}
                 className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
               >
                 ← Back to packages
@@ -195,7 +242,12 @@ export default function CreditsPage() {
                 elementsOptions: { appearance },
               }}
             >
-              <CreditsCheckoutForm locale={locale} userEmail={user.email ?? null} />
+              <CreditsCheckoutForm
+                locale={locale}
+                userEmail={user.email ?? null}
+                selectedAmount={selectedPackage?.amount ?? 0}
+                selectedCredits={selectedPackage?.credits ?? 0}
+              />
             </CheckoutProvider>
           </main>
           <RightSidebar />

@@ -3,11 +3,57 @@ package middleware
 import (
 	"backend/entity"
 	"backend/repository"
+	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
+
+// ViewingCookieName 与前端 twixter_viewing 一致
+const ViewingCookieName = "twixter_viewing"
+const viewingCookieMaxAge = 365 * 24 * 60 * 60 // 365 days
+
+// ViewingCookieFromRequest 从请求中读取 twixter_viewing cookie（已解码的值）
+func ViewingCookieFromRequest(c *gin.Context) string {
+	val, _ := c.Cookie(ViewingCookieName)
+	val = strings.TrimSpace(val)
+	if val == "viewing_light" || val == "viewing_dark" {
+		return val
+	}
+	return ""
+}
+
+// DecodeViewingParam 解码 query ?viewing= 的 base64 值，返回 viewing_light 或 viewing_dark，无效则返回空
+func DecodeViewingParam(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	decoded, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return ""
+	}
+	s := string(decoded)
+	if s == "viewing_light" || s == "viewing_dark" {
+		return s
+	}
+	return ""
+}
+
+// ViewingCookieMiddleware 若 query 带 ?viewing=<base64>，解码并设置 cookie twixter_viewing
+func ViewingCookieMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.Query("viewing")
+		if token != "" {
+			if decoded := DecodeViewingParam(token); decoded != "" {
+				c.SetCookie(ViewingCookieName, decoded, viewingCookieMaxAge, "/", "", false, false)
+			}
+		}
+		c.Next()
+	}
+}
 
 // RequirePermission 要求用户拥有指定权限的中间件
 // 使用权限名称进行检查
@@ -34,10 +80,7 @@ func RequirePermission(userPermissionRepo repository.UserPermissionRepository, p
 		}
 
 		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":               "Insufficient permissions",
-				"required_permission": permissionName,
-			})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
 			c.Abort()
 			return
 		}
@@ -71,11 +114,7 @@ func RequirePermissionByResourceAction(userPermissionRepo repository.UserPermiss
 		}
 
 		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":             "Insufficient permissions",
-				"required_resource": resource,
-				"required_action":   string(action),
-			})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
 			c.Abort()
 			return
 		}
@@ -108,10 +147,7 @@ func RequireAnyPermission(userPermissionRepo repository.UserPermissionRepository
 		}
 
 		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":                "Insufficient permissions",
-				"required_permissions": permissionNames,
-			})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
 			c.Abort()
 			return
 		}
@@ -144,15 +180,47 @@ func RequireAllPermissions(userPermissionRepo repository.UserPermissionRepositor
 		}
 
 		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":                "Insufficient permissions",
-				"required_permissions": permissionNames,
-			})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
 			c.Abort()
 			return
 		}
 
 		c.Next()
+	}
+}
+
+// RequireNSFWPermissionForDarkList 检查 feed 列表 category=dark 时的权限
+// 当 query category=dark 时：已登录需 can_view_nsfw；未登录则需 cookie twixter_viewing=viewing_dark
+func RequireNSFWPermissionForDarkList(userPermissionRepo repository.UserPermissionRepository) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		category := c.DefaultQuery("category", "light")
+		if category != "dark" {
+			c.Next()
+			return
+		}
+		user, exists := GetUserFromContext(c)
+		if exists {
+			hasPermission, err := userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permission"})
+				c.Abort()
+				return
+			}
+			if !hasPermission {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
+				c.Abort()
+				return
+			}
+			c.Next()
+			return
+		}
+		// 未登录：允许 cookie twixter_viewing=viewing_dark 或 query ?viewing= 解码为 viewing_dark
+		if ViewingCookieFromRequest(c) == "viewing_dark" || DecodeViewingParam(c.Query("viewing")) == "viewing_dark" {
+			c.Next()
+			return
+		}
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.Abort()
 	}
 }
 
@@ -190,37 +258,29 @@ func RequireNSFWPermissionForDarkContent(
 		}
 
 		// 内容为 dark 分类，需要检查权限
-		// 获取用户信息
 		user, exists := GetUserFromContext(c)
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Unauthorized",
-			})
-			c.Abort()
+		if exists {
+			hasPermission, err := userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permission"})
+				c.Abort()
+				return
+			}
+			if !hasPermission {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
+				c.Abort()
+				return
+			}
+			c.Next()
 			return
 		}
-
-		// 检查用户是否有 can_view_nsfw 权限
-		hasPermission, err := userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to check permission",
-			})
-			c.Abort()
+		// 未登录：允许 cookie twixter_viewing=viewing_dark 或 query ?viewing= 解码为 viewing_dark 时访问 dark 内容详情
+		if ViewingCookieFromRequest(c) == "viewing_dark" || DecodeViewingParam(c.Query("viewing")) == "viewing_dark" {
+			c.Next()
 			return
 		}
-
-		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":               "Insufficient permissions",
-				"required_permission": "can_view_nsfw",
-				"message":             "This content requires can_view_nsfw permission to view",
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.Abort()
 	}
 }
 
@@ -267,36 +327,28 @@ func RequireNSFWPermissionForDarkContentByFileID(
 		}
 
 		// 内容为 dark 分类，需要检查权限
-		// 获取用户信息
 		user, exists := GetUserFromContext(c)
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Unauthorized",
-			})
-			c.Abort()
+		if exists {
+			hasPermission, err := userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permission"})
+				c.Abort()
+				return
+			}
+			if !hasPermission {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
+				c.Abort()
+				return
+			}
+			c.Next()
 			return
 		}
-
-		// 检查用户是否有 can_view_nsfw 权限
-		hasPermission, err := userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to check permission",
-			})
-			c.Abort()
+		// 未登录：允许 cookie 或 query ?viewing= 解码为 viewing_dark 时访问 dark 内容流
+		if ViewingCookieFromRequest(c) == "viewing_dark" || DecodeViewingParam(c.Query("viewing")) == "viewing_dark" {
+			c.Next()
 			return
 		}
-
-		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":               "Insufficient permissions",
-				"required_permission": "can_view_nsfw",
-				"message":             "This content requires can_view_nsfw permission to view",
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.Abort()
 	}
 }

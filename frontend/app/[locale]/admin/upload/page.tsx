@@ -1,20 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { TagAutocomplete } from "@/components/TagAutocomplete";
+import { fetchCurrentUser, getAccessToken, getApiBase } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { getApiBase, getAccessToken, fetchCurrentUser } from "@/lib/api";
-import { TagAutocomplete } from "@/components/TagAutocomplete";
+import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const MAX_VIDEOS = 10;
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/x-msvideo,video/webm";
+
+type ContentCategory = "light" | "dark";
 
 type VideoEntry = {
   file: File | null;
   name: string;
   description: string;
   priceCredits: string;
+  category: ContentCategory;
   tags: string[];
 };
 
@@ -23,6 +26,7 @@ const defaultEntry: VideoEntry = {
   name: "",
   description: "",
   priceCredits: "0",
+  category: "light",
   tags: [],
 };
 
@@ -63,6 +67,7 @@ export default function AdminUploadPage() {
   }, [allowed, locale, router]);
 
   const updateEntry = useCallback((index: number, patch: Partial<VideoEntry>) => {
+    setError(null); // 用户修改任意一项时清除之前的错误，便于重选/重试
     setEntries((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], ...patch };
@@ -104,7 +109,7 @@ export default function AdminUploadPage() {
           description: e.description.trim(),
           price: parseFloat(e.priceCredits) || 0,
           tags: e.tags,
-          category: "light",
+          category: e.category,
         }));
         formData.set("videos", JSON.stringify(videosMeta));
         filled.forEach((e) => {
@@ -123,6 +128,9 @@ export default function AdminUploadPage() {
         }
         setSuccess(true);
         setEntries([{ ...defaultEntry }]);
+        fileInputRefs.current.forEach((el) => {
+          if (el) el.value = "";
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Request failed");
       } finally {
@@ -200,23 +208,47 @@ export default function AdminUploadPage() {
                   <label className="mb-1 block text-sm font-medium text-[var(--muted)]">
                     {t("file")}
                   </label>
-                  <input
-                    ref={(el) => {
-                      fileInputRefs.current[index] = el;
-                    }}
-                    type="file"
-                    accept={VIDEO_ACCEPT}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      updateEntry(index, { file: file ?? null });
-                    }}
-                    className="block w-full text-sm text-[var(--foreground)] file:mr-4 file:rounded file:border-0 file:bg-[var(--accent)] file:px-4 file:py-2 file:text-[var(--accent-foreground)]"
-                  />
-                  {entry.file && (
-                    <p className="mt-1 text-xs text-[var(--muted)]">
-                      {entry.file.name}
-                    </p>
-                  )}
+                  <div className="relative flex items-center gap-2">
+                    <input
+                      ref={(el) => {
+                        fileInputRefs.current[index] = el;
+                      }}
+                      id={`file-input-${index}`}
+                      type="file"
+                      accept={VIDEO_ACCEPT}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const baseName = file.name.replace(/\.[^.]+$/, "");
+                          updateEntry(index, {
+                            file,
+                            name: baseName || file.name,
+                            description: baseName || file.name,
+                          });
+                        } else {
+                          updateEntry(index, { file: null });
+                        }
+                        e.target.value = "";
+                      }}
+                      className="sr-only"
+                      aria-label={t("file")}
+                    />
+                    <label
+                      htmlFor={`file-input-${index}`}
+                      className="cursor-pointer rounded border-0 bg-[var(--accent)] px-4 py-2 text-sm text-[var(--accent-foreground)] hover:opacity-90"
+                    >
+                      {t("chooseFile")}
+                    </label>
+                    {entry.file ? (
+                      <span className="text-sm text-[var(--muted)]">
+                        {entry.file.name}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-[var(--muted)]">
+                        {t("noFileChosen")}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -263,6 +295,25 @@ export default function AdminUploadPage() {
                     className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
                     placeholder="0"
                   />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-[var(--muted)]">
+                    {t("category")}
+                  </label>
+                  <select
+                    value={entry.category}
+                    onChange={(e) =>
+                      updateEntry(index, {
+                        category: e.target.value as ContentCategory,
+                      })
+                    }
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                    aria-label={t("category")}
+                  >
+                    <option value="light">{t("categoryLight")}</option>
+                    <option value="dark">{t("categoryDark")}</option>
+                  </select>
                 </div>
 
                 <div>

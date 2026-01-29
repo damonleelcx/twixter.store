@@ -1,98 +1,64 @@
 "use client";
 
-import type { ContentFeedItem, ContentFeedResponse } from "@/lib/api";
-import { fetchContentFeed } from "@/lib/api";
+import type { ContentFeedItem } from "@/lib/api";
+import { fetchLibraryContent } from "@/lib/api";
 import { useLocale, useTranslations } from "next-intl";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContentCard } from "./ContentCard";
-import type { FeedTab } from "./MainFeedHeader";
-
-type FeedListProps = {
-  activeTab: FeedTab;
-  /** Server-fetched first page for "For you" tab (SSR). */
-  initialForYouFeed?: ContentFeedResponse;
-};
 
 const PAGE_SIZE = 20;
 
-export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
+export function LibraryList() {
   const locale = useLocale();
   const tFeed = useTranslations("feed");
-  const [items, setItems] = useState<ContentFeedItem[]>(() =>
-    initialForYouFeed ? initialForYouFeed.items : []
-  );
-  const [isLoading, setIsLoading] = useState(() => !initialForYouFeed);
+  const tLibrary = useTranslations("library");
+  const tAuth = useTranslations("auth");
+  const [items, setItems] = useState<ContentFeedItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(() => initialForYouFeed?.has_more ?? true);
-  const [cursor, setCursor] = useState(() => initialForYouFeed?.next_cursor ?? 0);
+  const [hasMore, setHasMore] = useState(true);
+  const [cursor, setCursor] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [isAuthError, setIsAuthError] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
-  const initialForYouRef = useRef(initialForYouFeed);
 
-  const category = activeTab === "forYou" ? "light" : "dark";
-
-  const loadPage = useCallback(
-    async (pageCursor: number, append: boolean) => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
-      if (pageCursor === 0) {
-        setIsLoading(true);
-        setError(null);
-      } else {
-        setIsLoadingMore(true);
-      }
-      try {
-        const { items: nextItems, next_cursor, has_more } = await fetchContentFeed(
-          category,
-          pageCursor,
-          PAGE_SIZE
-        );
-        setItems((prev) => (append ? [...prev, ...nextItems] : nextItems));
-        setCursor(next_cursor);
-        setHasMore(has_more);
-      } catch (err) {
-        const raw = err instanceof Error ? err.message : "Failed to load";
-        const msg =
-          activeTab === "premium" &&
-          (raw.toLowerCase().includes("nsfw") ||
-            raw.toLowerCase().includes("can_view") ||
-            raw.toLowerCase().includes("unauthorized") ||
-            raw.toLowerCase().includes("permission"))
-            ? "Unable to load premium content."
-            : raw;
-        setError(msg);
-        if (pageCursor === 0) setItems([]);
-      } finally {
-        loadingRef.current = false;
-        setIsLoading(false);
-        setIsLoadingMore(false);
-      }
-    },
-    [category]
-  );
+  const loadPage = useCallback(async (pageCursor: number, append: boolean) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (pageCursor === 0) {
+      setIsLoading(true);
+      setError(null);
+      setIsAuthError(false);
+    } else {
+      setIsLoadingMore(true);
+    }
+    try {
+      const { items: nextItems, next_cursor, has_more } =
+        await fetchLibraryContent(pageCursor, PAGE_SIZE);
+      setItems((prev) => (append ? [...prev, ...nextItems] : nextItems));
+      setCursor(next_cursor);
+      setHasMore(has_more);
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "Failed to load library";
+      const authErr =
+        raw.toLowerCase().includes("session") ||
+        raw.toLowerCase().includes("sign in") ||
+        raw.toLowerCase().includes("expired");
+      setIsAuthError(authErr);
+      setError(authErr ? tLibrary("signInToView") : raw);
+      if (pageCursor === 0) setItems([]);
+    } finally {
+      loadingRef.current = false;
+      setIsLoading(false);
+      setIsLoadingMore(false);
+    }
+  }, [tLibrary]);
 
   useEffect(() => {
-    if (activeTab === "premium") {
-      setItems([]);
-      setCursor(0);
-      setHasMore(true);
-      loadPage(0, false);
-    } else {
-      const initial = initialForYouRef.current;
-      if (initial) {
-        setItems(initial.items);
-        setCursor(initial.next_cursor);
-        setHasMore(initial.has_more);
-        setIsLoading(false);
-      } else {
-        setItems([]);
-        setCursor(0);
-        setHasMore(true);
-        loadPage(0, false);
-      }
-    }
-  }, [activeTab, loadPage]);
+    loadPage(0, false);
+  }, [loadPage]);
 
   const loadMore = useCallback(() => {
     if (!hasMore || loadingRef.current) return;
@@ -152,14 +118,31 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
   if (error && items.length === 0) {
     return (
       <div className="border-b border-[var(--border)] px-4 py-8 text-center">
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-        <button
-          type="button"
-          onClick={() => loadPage(0, false)}
-          className="mt-4 rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]"
-        >
-          Retry
-        </button>
+        <p className="text-sm text-[var(--muted)]">{error}</p>
+        {isAuthError ? (
+          <Link
+            href={`/${locale}/auth/signin`}
+            className="mt-4 inline-block rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-[var(--accent-foreground)] hover:opacity-90"
+          >
+            {tAuth("signIn")}
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => loadPage(0, false)}
+            className="mt-4 rounded-lg border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--hover)]"
+          >
+            {tLibrary("retry")}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="border-b border-[var(--border)] px-4 py-12 text-center">
+        <p className="text-sm text-[var(--muted)]">{tLibrary("empty")}</p>
       </div>
     );
   }
@@ -169,17 +152,8 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
       {items.map((item) => (
         <ContentCard
           key={item.id}
-          item={item}
+          item={{ ...item, purchased: true }}
           locale={locale}
-          onPurchased={(purchasedItem) => {
-            setItems((prev) =>
-              prev.map((i) =>
-                i.id === purchasedItem.id ? { ...i, purchased: true } : i
-              )
-            );
-            // Refetch current page so GIF preview and server state are correct
-            loadPage(0, false);
-          }}
         />
       ))}
       <div
@@ -211,7 +185,7 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
             <span className="text-sm">{tFeed("loading")}</span>
           </div>
         )}
-        {!hasMore && items.length > 0 && !isLoadingMore && (
+        {!hasMore && !isLoadingMore && (
           <p className="text-sm text-[var(--muted)]">{tFeed("allCaughtUp")}</p>
         )}
       </div>

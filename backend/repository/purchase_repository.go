@@ -33,6 +33,9 @@ type PurchaseRepository interface {
 	// GetLatestActiveMembership 获取用户当前有效的会员（未过期且已完成的最近一条）
 	GetLatestActiveMembership(userID uint) (*entity.PurchaseBase, error)
 
+	// HasUserPurchasedContent 用户是否已购买该内容（已完成的内容购买）
+	HasUserPurchasedContent(userID uint, contentID uint) (bool, error)
+
 	// 统计操作
 	CountByUserID(userID uint) (int64, error)
 	CountByType(userID uint, purchaseType entity.PurchaseType) (int64, error)
@@ -510,6 +513,38 @@ func (r *purchaseRepository) GetLatestActiveMembership(userID uint) (*entity.Pur
 		}
 		return &p.PurchaseBase, nil
 	}
+}
+
+// HasUserPurchasedContent 用户是否已购买该内容（已完成的内容购买）
+func (r *purchaseRepository) HasUserPurchasedContent(userID uint, contentID uint) (bool, error) {
+	shardNum := entity.GetPurchaseShardNumber(userID)
+	cond := "user_id = ? AND purchase_type = ? AND status = ? AND content_id = ?"
+	args := []interface{}{userID, entity.PurchaseTypeContent, entity.PurchaseStatusCompleted, contentID}
+	var err error
+	switch shardNum {
+	case 0:
+		var p entity.PurchaseShard0
+		err = r.db.Where(cond, args...).Limit(1).First(&p).Error
+	case 1:
+		var p entity.PurchaseShard1
+		err = r.db.Where(cond, args...).Limit(1).First(&p).Error
+	case 2:
+		var p entity.PurchaseShard2
+		err = r.db.Where(cond, args...).Limit(1).First(&p).Error
+	case 3:
+		var p entity.PurchaseShard3
+		err = r.db.Where(cond, args...).Limit(1).First(&p).Error
+	default:
+		var p entity.PurchaseShard0
+		err = r.db.Where(cond, args...).Limit(1).First(&p).Error
+	}
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // CountByUserID 统计用户的购买记录数量（从分片表）

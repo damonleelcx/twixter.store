@@ -4,20 +4,34 @@
     "explore": "Explore",
     "notifications": "Notifications",
     "messages": "Messages",
+    "library": "Library",
     "bookmarks": "Bookmarks",
     "profile": "Profile",
     "post": "Post",
     "adminUpload": "Admin Upload",
     "subscribe": "Subscribe"
   },
+  "library": {
+    "empty": "No purchased content yet.",
+    "signInToView": "Sign in to view your library.",
+    "retry": "Retry"
+  },
+  "bookmarks": {
+    "empty": "No bookmarks yet.",
+    "signInToView": "Sign in to view your bookmarks.",
+    "retry": "Retry"
+  },
   "feed": {
     "home": "Home",
     "forYou": "For you",
     "following": "Following",
+    "premiumContent": "Premium content",
     "composePlaceholder": "What is happening?!",
     "post": "Post",
     "loading": "Loading...",
-    "allCaughtUp": "You're all caught up"
+    "allCaughtUp": "You're all caught up",
+    "unlockToView": "Purchase to unlock",
+    "credits": "credits"
   },
   "compose": {
     "media": "Media",
@@ -26,6 +40,7 @@
   },
   "sidebar": {
     "premiumTitle": "Subscribe to Premium",
+    "premiumMember":"Premium member",
     "premiumDescription": "Subscribe to unlock all content and support the platform.",
     "subscribe": "Subscribe",
     "whatsHappening": "What's happening",
@@ -55,7 +70,14 @@
     "like": "Like",
     "share": "Share",
     "bookmark": "Bookmark",
-    "showReplies": "Show replies"
+    "showReplies": "Show replies",
+    "unlockToView": "Purchase to unlock",
+    "credits": "credits",
+    "purchase": "Purchase",
+    "purchasing": "Purchasing…",
+    "signInToPurchase": "Sign in to purchase",
+    "signUpToView": "Sign up to view",
+    "playVideo": "Play video"
   },
   "auth": {
     "signIn": "Sign in",
@@ -108,7 +130,8 @@
     "payment": "Payment",
     "processing": "Processing…",
     "payNow": "Pay",
-    "backToPlans": "Back to plans"
+    "backToPlans": "Back to plans",
+    "orPayWithPayPal": "Or pay with other options"
   },
   "purchaseReturn": {
     "verifyingTitle": "Verifying payment...",
@@ -130,11 +153,16 @@
       "back": "Back to Home",
       "loading": "Checking access...",
       "file": "Video file",
+      "chooseFile": "Choose File",
+      "noFileChosen": "No file chosen",
       "name": "Name",
       "namePlaceholder": "Video name",
       "description": "Description",
       "descriptionPlaceholder": "Optional description",
       "priceCredits": "Price (credits)",
+      "category": "Category",
+      "categoryLight": "Light (general)",
+      "categoryDark": "Dark (NSFW)",
       "tags": "Tags",
       "tagsPlaceholder": "Search or add tags...",
       "video": "Video",

@@ -21,6 +21,8 @@ type ContentRepository interface {
 	GetByStatus(status entity.ContentStatus, limit, offset int) ([]entity.Content, error)
 	GetPublic(limit, offset int) ([]entity.Content, error)
 	GetByCategory(category string, limit, offset int) ([]entity.Content, error)
+	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）
+	ListFeedByCategory(category string, limit, offset int) ([]entity.Content, error)
 	Search(keyword string, limit, offset int) ([]entity.Content, error)
 
 	// 统计操作
@@ -122,6 +124,17 @@ func (r *contentRepository) GetPublic(limit, offset int) ([]entity.Content, erro
 func (r *contentRepository) GetByCategory(category string, limit, offset int) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("category = ?", category).
+		Limit(limit).Offset(offset).Order("created_at DESC")
+	if err := query.Find(&contents).Error; err != nil {
+		return nil, err
+	}
+	return contents, nil
+}
+
+// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）
+func (r *contentRepository) ListFeedByCategory(category string, limit, offset int) ([]entity.Content, error) {
+	var contents []entity.Content
+	query := r.db.Where("category = ? AND status = ?", category, entity.ContentStatusReady).
 		Limit(limit).Offset(offset).Order("created_at DESC")
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err

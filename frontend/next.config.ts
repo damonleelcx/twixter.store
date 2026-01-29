@@ -17,6 +17,10 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  experimental: {
+    // 代理 /api 到后端时允许超大 body（默认 10MB），视频上传走专用 Route Handler 无超时
+    proxyClientMaxBodySize: "100gb",
+  },
 };
 
 export default withNextIntl(nextConfig);

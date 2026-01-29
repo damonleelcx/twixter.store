@@ -79,9 +79,9 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
-	// 检查是否可以生成GIF
+	// 非预期阶段时 ack 消息，避免重复重试（可能已失败或已进入下一阶段）
 	if !file.CanGenerateGif() {
-		return fmt.Errorf("file %d is not in correct stage for GIF generation", fileID)
+		return nil
 	}
 
 	// 下载原始视频到临时目录
@@ -90,28 +90,35 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download video: %v", err))
 		return err
 	}
-	defer os.Remove(localVideoPath)
+	defer func() { _ = os.Remove(localVideoPath) }()
 
-	// 生成GIF
-	localGifPath := filepath.Join(v.tempDir, fmt.Sprintf("gif_%d_%d.gif", fileID, time.Now().Unix()))
-	startTime := 0.0
-	duration := 5.0 // 生成前5秒的GIF
-
-	// 获取视频信息以确定时长
+	// 获取视频信息以使用整段视频时长生成GIF（帧从全片选取）
 	videoInfo, err := v.videoProcessingService.GetVideoInfo(localVideoPath)
-	if err == nil && videoInfo.Duration > 0 {
-		if videoInfo.Duration < duration {
-			duration = videoInfo.Duration
-		}
+	if err != nil {
+		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to get video info: %v", err))
+		return err
 	}
+	duration := videoInfo.Duration
+	if duration <= 0 {
+		duration = 5.0
+	}
+	const gifFrameLimit = 10
 
-	if err := v.videoProcessingService.GenerateGif(localVideoPath, localGifPath, startTime, duration); err != nil {
+	localGifPath := filepath.Join(v.tempDir, fmt.Sprintf("gif_%d_%d.gif", fileID, time.Now().Unix()))
+
+	if err := v.videoProcessingService.GenerateGifSampled(localVideoPath, localGifPath, duration, gifFrameLimit); err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to generate GIF: %v", err))
 		return err
 	}
-	defer os.Remove(localGifPath)
+	defer func() { _ = os.Remove(localGifPath) }()
 
-	// 上传GIF到S3
+	// 上传前获取GIF文件大小（上传后 S3 服务会删除本地文件）
+	gifFileSize := int64(0)
+	if gifFileInfo, err := os.Stat(localGifPath); err == nil {
+		gifFileSize = gifFileInfo.Size()
+	}
+
+	// 上传GIF到S3（成功或失败后本地文件都会在 defer 中尝试删除）
 	gifS3Key := fmt.Sprintf("gifs/%d/%d_%d.gif", file.ContentID, fileID, time.Now().Unix())
 	gifURL, err := v.s3Service.UploadFileFromPath("", gifS3Key, localGifPath, "image/gif")
 	if err != nil {
@@ -119,23 +126,24 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		return err
 	}
 
-	// 获取GIF文件大小
-	gifFileInfo, _ := os.Stat(localGifPath)
-	gifFileSize := int64(0)
-	if gifFileInfo != nil {
-		gifFileSize = gifFileInfo.Size()
-	}
-
-	// 更新文件记录
+	// 更新文件记录（失败时删除已上传的 GIF）
 	file.GifFilePath = gifS3Key
 	file.GifFileURL = gifURL
 	file.GifFileSize = gifFileSize
 	file.Stage = entity.StageGifGenerated
 	if err := v.fileRepo.Update(file); err != nil {
+		_ = v.s3Service.DeleteFile("", gifS3Key)
 		return fmt.Errorf("failed to update file: %w", err)
 	}
 
-	// 发送转码任务消息
+	// 将生成的 GIF 设为该条内容的缩略图（若尚未设置则用首个文件的 GIF；多文件时首个处理完的为准）
+	content, err := v.contentRepo.GetByID(file.ContentID)
+	if err == nil && content.ThumbnailURL == "" {
+		content.ThumbnailURL = gifURL
+		_ = v.contentRepo.Update(content)
+	}
+
+	// 发送转码任务消息（失败时删除已上传的 GIF）
 	transcodeMsg := &KafkaMessage{
 		Type:      "video_transcode",
 		ContentID: file.ContentID,
@@ -145,11 +153,10 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 			"s3_key": file.OriginalFilePath,
 		},
 	}
-
 	if err := v.kafkaService.SendMessage(TopicVideoTranscode, transcodeMsg); err != nil {
+		_ = v.s3Service.DeleteFile("", gifS3Key)
 		return fmt.Errorf("failed to send transcode message: %w", err)
 	}
-
 	return nil
 }
 
@@ -163,9 +170,9 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
-	// 检查是否可以转码
+	// 非预期阶段时 ack 消息，避免重复重试
 	if !file.CanTranscode() {
-		return fmt.Errorf("file %d is not in correct stage for transcode", fileID)
+		return nil
 	}
 
 	// 下载原始视频到临时目录
@@ -174,7 +181,7 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download video: %v", err))
 		return err
 	}
-	defer os.Remove(localVideoPath)
+	defer func() { _ = os.Remove(localVideoPath) }()
 
 	// 转码视频为HLS格式
 	outputDir := filepath.Join(v.tempDir, fmt.Sprintf("hls_%d_%d", fileID, time.Now().Unix()))
@@ -184,7 +191,7 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		Codec:      "libx264",
 		Bitrate:    "2000k",
 		Resolution: "1920x1080", // 转码到 1080p 分辨率
-		Quality:    "medium",
+		Quality:    "high",
 		Format:     "hls",
 	}
 
@@ -194,12 +201,12 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		return err
 	}
 	defer func() {
-		// 清理所有生成的文件
-		os.Remove(hlsOutput.PlaylistPath)
+		// 无论上传成功或失败，最终都清理本地 m3u8/ts 与目录
+		_ = os.Remove(hlsOutput.PlaylistPath)
 		for _, segmentPath := range hlsOutput.SegmentPaths {
-			os.Remove(segmentPath)
+			_ = os.Remove(segmentPath)
 		}
-		os.RemoveAll(outputDir)
+		_ = os.RemoveAll(outputDir)
 	}()
 
 	// 获取视频信息（从第一个分片或原始视频）
@@ -212,7 +219,7 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		}
 	}
 
-	// 上传 .m3u8 播放列表文件到S3临时位置
+	// 上传 .m3u8 播放列表文件到S3临时位置（失败时 defer 会清理本地 playlist/ts 和 outputDir）
 	tempPlaylistS3Key := fmt.Sprintf("temp/transcoded/%d/%d_%d.m3u8", file.ContentID, fileID, time.Now().Unix())
 	tempPlaylistURL, err := v.s3Service.UploadFileFromPath("", tempPlaylistS3Key, hlsOutput.PlaylistPath, "application/vnd.apple.mpegurl")
 	if err != nil {
@@ -221,7 +228,7 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 	}
 	_ = tempPlaylistURL
 
-	// 上传所有 .ts 分片文件到S3临时位置
+	// 上传所有 .ts 分片文件到S3临时位置（任一失败时删除已上传的 temp 并返回）
 	tempSegmentS3Keys := make([]string, 0, len(hlsOutput.SegmentPaths))
 	for i, segmentPath := range hlsOutput.SegmentPaths {
 		segmentName := filepath.Base(segmentPath)
@@ -229,18 +236,20 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		_, err := v.s3Service.UploadFileFromPath("", tempSegmentS3Key, segmentPath, "video/mp2t")
 		if err != nil {
 			v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload segment file %d to temp: %v", i, err))
+			v.deleteS3Keys("", append([]string{tempPlaylistS3Key}, tempSegmentS3Keys...)...)
 			return err
 		}
 		tempSegmentS3Keys = append(tempSegmentS3Keys, tempSegmentS3Key)
 	}
 
-	// 更新文件记录
+	// 更新文件记录（失败时删除已上传的 temp）
 	file.Stage = entity.StageTranscoded
 	if err := v.fileRepo.Update(file); err != nil {
+		v.deleteS3Keys("", append([]string{tempPlaylistS3Key}, tempSegmentS3Keys...)...)
 		return fmt.Errorf("failed to update file: %w", err)
 	}
 
-	// 发送转码文件上传任务消息（包含临时S3路径）
+	// 发送转码文件上传任务消息（失败时删除已上传的 temp）
 	uploadMsg := &KafkaMessage{
 		Type:      "transcode_upload",
 		ContentID: file.ContentID,
@@ -252,11 +261,10 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 			"output_name":          outputName,
 		},
 	}
-
 	if err := v.kafkaService.SendMessage(TopicTranscodeUpload, uploadMsg); err != nil {
+		v.deleteS3Keys("", append([]string{tempPlaylistS3Key}, tempSegmentS3Keys...)...)
 		return fmt.Errorf("failed to send upload message: %w", err)
 	}
-
 	return nil
 }
 
@@ -270,9 +278,9 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
-	// 检查是否可以上传转码文件
+	// 非预期阶段时 ack 消息，避免重复重试
 	if !file.CanUploadTranscoded() {
-		return fmt.Errorf("file %d is not in correct stage for transcode upload", fileID)
+		return nil
 	}
 
 	// 从消息中获取临时S3路径
@@ -297,9 +305,9 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download playlist file: %v", err))
 		return err
 	}
-	defer os.Remove(localPlaylistPath)
+	defer func() { _ = os.Remove(localPlaylistPath) }()
 
-	// 下载所有 .ts 分片文件到本地
+	// 下载所有 .ts 分片文件到本地（任一失败时已注册的 defers 会清理已下载的文件）
 	localSegmentPaths := make([]string, 0, len(tempSegmentS3Keys))
 	for i, tempSegmentS3Key := range tempSegmentS3Keys {
 		segmentKey, ok := tempSegmentS3Key.(string)
@@ -312,7 +320,7 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 			return err
 		}
 		localSegmentPaths = append(localSegmentPaths, localSegmentPath)
-		defer os.Remove(localSegmentPath)
+		defer func(p string) { _ = os.Remove(p) }(localSegmentPath)
 	}
 
 	// 计算总文件大小
@@ -341,23 +349,24 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to modify playlist file: %v", err))
 		return err
 	}
-	defer os.Remove(modifiedPlaylistPath)
+	defer func() { _ = os.Remove(modifiedPlaylistPath) }()
 
+	// 上传 .m3u8 到最终 S3 位置（失败时上面所有 defers 会清理本地文件）
 	playlistURL, err := v.s3Service.UploadFileFromPath("", finalPlaylistS3Key, modifiedPlaylistPath, "application/vnd.apple.mpegurl")
 	if err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload playlist file: %v", err))
 		return err
 	}
 
-	// 上传所有 .ts 分片文件到最终S3位置（与 .m3u8 在同一目录）
+	// 上传所有 .ts 分片文件到最终 S3 位置（任一失败时删除已上传的最终 m3u8/ts）
 	segmentS3Keys := make([]string, 0, len(localSegmentPaths))
 	for i, localSegmentPath := range localSegmentPaths {
-		// 生成分片文件名（与转码时生成的名称一致）
 		originalSegmentName := fmt.Sprintf("%s_%03d.ts", outputName, i)
 		finalSegmentS3Key := fmt.Sprintf("%s/%s", baseDir, originalSegmentName)
 		_, err := v.s3Service.UploadFileFromPath("", finalSegmentS3Key, localSegmentPath, "video/mp2t")
 		if err != nil {
 			v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload segment file %d: %v", i, err))
+			v.deleteS3Keys("", append([]string{finalPlaylistS3Key}, segmentS3Keys...)...)
 			return err
 		}
 		segmentS3Keys = append(segmentS3Keys, finalSegmentS3Key)
@@ -371,16 +380,17 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 		}
 	}
 
-	// 更新文件记录（.m3u8 文件路径作为主路径）
+	// 更新文件记录（失败时删除已上传的最终 m3u8/ts）
 	file.TranscodedFilePath = finalPlaylistS3Key
 	file.TranscodedFileURL = playlistURL
 	file.TranscodedFileSize = totalSize
 	file.Stage = entity.StageTranscodedUploaded
 	if err := v.fileRepo.Update(file); err != nil {
+		v.deleteS3Keys("", append([]string{finalPlaylistS3Key}, segmentS3Keys...)...)
 		return fmt.Errorf("failed to update file: %w", err)
 	}
 
-	// 发送原始文件删除任务消息
+	// 发送原始文件删除任务消息（失败时删除已上传的最终 m3u8/ts）
 	deleteMsg := &KafkaMessage{
 		Type:      "original_delete",
 		ContentID: file.ContentID,
@@ -390,11 +400,10 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 			"s3_key": file.OriginalFilePath,
 		},
 	}
-
 	if err := v.kafkaService.SendMessage(TopicOriginalDelete, deleteMsg); err != nil {
+		v.deleteS3Keys("", append([]string{finalPlaylistS3Key}, segmentS3Keys...)...)
 		return fmt.Errorf("failed to send delete message: %w", err)
 	}
-
 	return nil
 }
 
@@ -408,9 +417,9 @@ func (v *VideoProcessorConsumer) handleOriginalDelete(msg *KafkaMessage) error {
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
-	// 检查是否可以删除原始文件
+	// 非预期阶段时 ack 消息，避免重复重试
 	if !file.CanDeleteOriginal() {
-		return fmt.Errorf("file %d is not in correct stage for original delete", fileID)
+		return nil
 	}
 
 	// 从S3删除原始文件
@@ -498,6 +507,13 @@ func (v *VideoProcessorConsumer) modifyPlaylistFile(playlistPath, outputName str
 	}
 
 	return modifiedPath, nil
+}
+
+// deleteS3Keys 删除多个 S3 对象（忽略单次删除失败，用于出错时清理）
+func (v *VideoProcessorConsumer) deleteS3Keys(bucket string, keys ...string) {
+	for _, key := range keys {
+		_ = v.s3Service.DeleteFile(bucket, key)
+	}
 }
 
 // updateFileError 更新文件错误状态

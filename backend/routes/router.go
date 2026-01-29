@@ -13,6 +13,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// 视频上传等 multipart 最大内存（100GB），等效不限制
+const maxMultipartMemory = 100 << 30
+
 // SetupRouter 设置所有路由
 func SetupRouter(
 	db *gorm.DB,
@@ -23,6 +26,7 @@ func SetupRouter(
 	sentryDSN string,
 ) *gin.Engine {
 	router := gin.Default()
+	router.MaxMultipartMemory = maxMultipartMemory
 
 	// 全局中间件：Sentry 错误监控和恢复（使用官方 Gin SDK）
 	if sentryDSN != "" {
@@ -139,32 +143,51 @@ func setupContentRoutes(
 ) {
 	contentRoutes := api.Group("/content")
 	contentRoutes.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimiter))
-	contentRoutes.Use(middleware.AuthMiddleware(authService))
+	contentRoutes.Use(middleware.ViewingCookieMiddleware()) // 解码 ?viewing= 并设置 cookie twixter_viewing
+	// 列表 feed（可选登录；category=dark 时需 can_view_nsfw 或 cookie viewing_dark）
+	contentRoutes.GET("/list",
+		middleware.OptionalAuthMiddleware(authService),
+		middleware.RequireNSFWPermissionForDarkList(repos.UserPermissionRepo),
+		contentController.ListContent)
+	// GIF 预览：已购买返回原图，未购买返回后端模糊后的 JPEG（可选登录）
+	contentRoutes.GET("/files/:file_id/preview",
+		middleware.OptionalAuthMiddleware(authService),
+		contentController.StreamGifPreview)
+	// 字面路径 /library、/bookmarks 必须在 /:id 之前注册，否则 "library"/"bookmarks" 会被当作 id 匹配
+	contentRoutes.GET("/library", middleware.AuthMiddleware(authService), contentController.ListLibrary)
+	contentRoutes.GET("/bookmarks", middleware.AuthMiddleware(authService), contentController.ListBookmarks)
+	// 内容详情与流：可选登录，未登录时凭 cookie viewing_dark 可访问 dark 内容
+	contentRoutes.GET("/:id",
+		middleware.OptionalAuthMiddleware(authService),
+		middleware.RequireNSFWPermissionForDarkContent(repos.ContentRepo, repos.UserPermissionRepo),
+		cacheMiddleware.Cache(middleware.CacheOptions{
+			TTL:         5 * time.Minute,
+			VaryByUser:  true,
+			VaryByQuery: false,
+		}),
+		contentController.GetContent)
+	contentRoutes.GET("/files/:file_id/stream",
+		middleware.OptionalAuthMiddleware(authService),
+		middleware.RequireNSFWPermissionForDarkContentByFileID(repos.ContentFileRepo, repos.ContentRepo, repos.UserPermissionRepo),
+		contentController.StreamTranscodedFile)
+	// 记录内容观看：可选登录；未登录时仅跳过记录，不返回 401（与 viewing cookie 访问一致）
+	contentRoutes.POST("/:id/view",
+		middleware.OptionalAuthMiddleware(authService),
+		middleware.RequireNSFWPermissionForDarkContent(repos.ContentRepo, repos.UserPermissionRepo),
+		contentController.RecordContentView)
+
+	contentAuthRoutes := contentRoutes.Group("")
+	contentAuthRoutes.Use(middleware.AuthMiddleware(authService))
 	{
 		// 批量上传视频（最多10个）- 需要 admin 账户类型 + can_upload_content 权限
-		contentRoutes.POST("/videos/upload",
+		contentAuthRoutes.POST("/videos/upload",
 			middleware.RequirePermission(repos.UserPermissionRepo, "can_upload_content"),
 			contentController.UploadVideos)
-		// 获取内容详情（缓存 5 分钟，按用户区分以支持权限检查）
-		// 注意：权限检查中间件在缓存之前执行，确保只有有权限的用户才能访问缓存
-		contentRoutes.GET("/:id",
-			middleware.RequireNSFWPermissionForDarkContent(repos.ContentRepo, repos.UserPermissionRepo),
-			cacheMiddleware.Cache(middleware.CacheOptions{
-				TTL:         5 * time.Minute,
-				VaryByUser:  true, // 按用户区分，因为权限不同
-				VaryByQuery: false,
-			}),
-			contentController.GetContent)
-		// 流式传输转码文件（需要权限检查 dark 内容，用于视频播放，不缓存）
-		contentRoutes.GET("/files/:file_id/stream",
-			middleware.RequireNSFWPermissionForDarkContentByFileID(repos.ContentFileRepo, repos.ContentRepo, repos.UserPermissionRepo),
-			contentController.StreamTranscodedFile)
-		// 记录内容观看（需要权限检查 dark 内容）
-		contentRoutes.POST("/:id/view",
-			middleware.RequireNSFWPermissionForDarkContent(repos.ContentRepo, repos.UserPermissionRepo),
-			contentController.RecordContentView)
+		// 书签：添加 / 移除
+		contentAuthRoutes.POST("/:id/bookmark", contentController.AddBookmark)
+		contentAuthRoutes.DELETE("/:id/bookmark", contentController.RemoveBookmark)
 		// 获取内容分析数据（缓存 2 分钟，按查询参数区分，需要 can_view_analytics 权限）
-		contentRoutes.GET("/:id/analytics",
+		contentAuthRoutes.GET("/:id/analytics",
 			middleware.RequirePermission(repos.UserPermissionRepo, "can_view_analytics"),
 			cacheMiddleware.Cache(middleware.CacheOptions{
 				TTL:         2 * time.Minute,
@@ -210,10 +233,15 @@ func setupPurchaseRoutes(
 		protectedPurchaseRoutes.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimiter))
 		protectedPurchaseRoutes.Use(middleware.AuthMiddleware(authService))
 		{
-			// 创建会员购买结账会话
+			// 创建会员购买结账会话（Stripe）
 			protectedPurchaseRoutes.POST("/membership/checkout", purchaseController.CreateMembershipCheckout)
-			// 创建积分购买结账会话
+			// 创建会员购买 PayPal 订单（备用支付）
+			protectedPurchaseRoutes.POST("/membership/paypal/order", purchaseController.CreatePayPalMembershipOrder)
+			protectedPurchaseRoutes.POST("/membership/paypal/capture", purchaseController.CapturePayPalOrder)
+			// 创建积分购买结账会话（Stripe）
 			protectedPurchaseRoutes.POST("/credits/checkout", purchaseController.CreateCreditsCheckout)
+			// 创建积分购买 PayPal 订单（备用支付）
+			protectedPurchaseRoutes.POST("/credits/paypal/order", purchaseController.CreatePayPalCreditsOrder)
 			// 使用积分购买内容
 			protectedPurchaseRoutes.POST("/content", purchaseController.PurchaseContent)
 			// 验证结账状态
