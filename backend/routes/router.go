@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"backend/config"
@@ -9,6 +11,7 @@ import (
 	"backend/service"
 
 	sentrygin "github.com/getsentry/sentry-go/gin"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -27,6 +30,23 @@ func SetupRouter(
 ) *gin.Engine {
 	router := gin.Default()
 	router.MaxMultipartMemory = maxMultipartMemory
+
+	// CORS：当前端通过 NEXT_PUBLIC_API_URL 直连后端时（如 localhost:3000 → localhost:8080）需允许跨域
+	origins := []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+	if v := os.Getenv("CORS_ORIGINS"); v != "" {
+		for _, o := range strings.Split(v, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				origins = append(origins, o)
+			}
+		}
+	}
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     origins,
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// 全局中间件：Sentry 错误监控和恢复（使用官方 Gin SDK）
 	if sentryDSN != "" {
@@ -180,6 +200,11 @@ func setupContentRoutes(
 		middleware.OptionalAuthMiddleware(authService),
 		middleware.RequireNSFWPermissionForDarkContent(repos.ContentRepo, repos.UserPermissionRepo),
 		contentController.RecordContentView)
+	// 记录观看进度（需登录，用于更新 TotalWatchTime / AverageWatchTime / CompletionRate）
+	contentRoutes.POST("/:id/watch-progress",
+		middleware.AuthMiddleware(authService),
+		middleware.RequireNSFWPermissionForDarkContent(repos.ContentRepo, repos.UserPermissionRepo),
+		contentController.RecordWatchProgress)
 
 	contentAuthRoutes := contentRoutes.Group("")
 	contentAuthRoutes.Use(middleware.AuthMiddleware(authService))

@@ -1,11 +1,17 @@
 "use client";
 
-import { getAccessToken, getApiBase } from "@/lib/api";
+import { getAccessToken, getApiBase, recordWatchProgress } from "@/lib/api";
 import Hls from "hls.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const WATCH_PROGRESS_INTERVAL_SEC = 30;
+
 type HlsPlayerProps = {
   fileId: number;
+  /** When set with durationSeconds, watch progress is reported for analytics (TotalWatchTime, AverageWatchTime, CompletionRate). */
+  contentId?: number;
+  /** Video duration in seconds (from content file). Used for completion rate when reporting watch progress. */
+  durationSeconds?: number;
   className?: string;
   poster?: string;
   /** Optional "Play video" label for overlay (theme-aware). */
@@ -16,10 +22,19 @@ type HlsPlayerProps = {
 
 const DEFAULT_VERTICAL_ASPECT_FACTOR = 1 / 1.5;
 
-export function HlsPlayer({ fileId, className, poster, playLabel = "Play video", verticalAspectFactor }: HlsPlayerProps) {
+export function HlsPlayer({
+  fileId,
+  contentId,
+  durationSeconds,
+  className,
+  poster,
+  playLabel = "Play video",
+  verticalAspectFactor,
+}: HlsPlayerProps) {
   const factor = verticalAspectFactor ?? DEFAULT_VERTICAL_ASPECT_FACTOR;
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const lastReportedTimeRef = useRef(0);
   const [showPlayOverlay, setShowPlayOverlay] = useState(true);
   const [wrapperStyle, setWrapperStyle] = useState<React.CSSProperties>({});
 
@@ -34,13 +49,44 @@ export function HlsPlayer({ fileId, className, poster, playLabel = "Play video",
     }
   }, []);
 
+  const reportProgress = useCallback(
+    (watchTimeSeconds: number, durationSec?: number) => {
+      if (!contentId || watchTimeSeconds <= 0) return;
+      const duration = durationSec ?? durationSeconds;
+      recordWatchProgress(contentId, watchTimeSeconds, duration).catch(() => {});
+    },
+    [contentId, durationSeconds]
+  );
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const onPlay = () => setShowPlayOverlay(false);
-    const onPause = () => setShowPlayOverlay(true);
-    const onEnded = () => setShowPlayOverlay(true);
+    const onPlay = () => {
+      setShowPlayOverlay(false);
+      lastReportedTimeRef.current = video.currentTime;
+    };
+    const onPause = () => {
+      setShowPlayOverlay(true);
+      if (contentId) {
+        const delta = Math.max(0, video.currentTime - lastReportedTimeRef.current);
+        if (delta > 0) {
+          reportProgress(delta, Number.isFinite(video.duration) ? video.duration : undefined);
+          lastReportedTimeRef.current = video.currentTime;
+        }
+      }
+    };
+    const onEnded = () => {
+      setShowPlayOverlay(true);
+      if (contentId) {
+        const delta = Math.max(0, video.currentTime - lastReportedTimeRef.current);
+        if (delta > 0) {
+          const dur = Number.isFinite(video.duration) ? video.duration : durationSeconds;
+          reportProgress(delta, dur);
+        }
+        lastReportedTimeRef.current = video.currentTime;
+      }
+    };
 
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
@@ -50,7 +96,23 @@ export function HlsPlayer({ fileId, className, poster, playLabel = "Play video",
       video.removeEventListener("pause", onPause);
       video.removeEventListener("ended", onEnded);
     };
-  }, []);
+  }, [contentId, durationSeconds, reportProgress]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !contentId) return;
+
+    const onTimeUpdate = () => {
+      const delta = video.currentTime - lastReportedTimeRef.current;
+      if (delta >= WATCH_PROGRESS_INTERVAL_SEC) {
+        reportProgress(delta, Number.isFinite(video.duration) ? video.duration : durationSeconds);
+        lastReportedTimeRef.current = video.currentTime;
+      }
+    };
+
+    video.addEventListener("timeupdate", onTimeUpdate);
+    return () => video.removeEventListener("timeupdate", onTimeUpdate);
+  }, [contentId, durationSeconds, reportProgress]);
 
   useEffect(() => {
     const video = videoRef.current;

@@ -323,6 +323,8 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
           {purchased && firstFile ? (
             <HlsPlayer
               fileId={firstFile.id}
+              contentId={contentId}
+              durationSeconds={firstFile.duration}
               className="block w-full h-auto object-contain"
               poster={blurredPreviewUrl ?? firstFile.gif_file_url ?? undefined}
               playLabel={t("playVideo")}

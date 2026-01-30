@@ -631,6 +631,60 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 	c.DataFromReader(http.StatusOK, -1, "application/vnd.apple.mpegurl", reader, nil)
 }
 
+// WatchProgressRequest 观看进度请求体
+type WatchProgressRequest struct {
+	WatchTimeSeconds  float64 `json:"watch_time_seconds" binding:"required,gte=0"`  // 本次观看时长（秒）
+	DurationSeconds   float64 `json:"duration_seconds"`                             // 视频总时长（秒），可选，用于计算完成率
+}
+
+// RecordWatchProgress 记录观看进度（视频流播放时由前端上报，用于更新 TotalWatchTime / AverageWatchTime / CompletionRate）
+// @Summary Record watch progress
+// @Description Record watch time and update completion rate for analytics
+// @Tags content
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path int true "Content ID"
+// @Param body body WatchProgressRequest true "Watch progress"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/content/{id}/watch-progress [post]
+func (cc *ContentController) RecordWatchProgress(c *gin.Context) {
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid content ID"})
+		return
+	}
+	var req WatchProgressRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+		return
+	}
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userBase := user.(*entity.UserBase)
+	duration := req.DurationSeconds
+	if duration <= 0 {
+		// 从内容首个文件的 duration 获取
+		files, err := cc.contentService.GetContentFiles(params.ID)
+		if err == nil && len(files) > 0 && files[0].Duration != nil && *files[0].Duration > 0 {
+			duration = *files[0].Duration
+		}
+	}
+	if err := cc.contentService.RecordWatchProgress(params.ID, userBase.ID, req.WatchTimeSeconds, duration); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	if middleware.GlobalCacheMiddleware != nil {
+		middleware.GlobalCacheMiddleware.InvalidateContentCache(params.ID)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Watch progress recorded"})
+}
+
 // RecordContentView 记录内容观看
 // @Summary Record content view
 // @Description Record a view/play event for content

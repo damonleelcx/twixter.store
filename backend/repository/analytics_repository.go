@@ -33,6 +33,7 @@ type AnalyticsRepository interface {
 	IncrementDownloads(contentID uint) error
 	IncrementPlayCount(contentID uint) error
 	AddWatchTime(contentID uint, seconds float64) error
+	UpdateCompletionRate(contentID uint, contentDuration float64) error
 	IncrementPurchaseCount(contentID uint) error
 	AddRevenue(contentID uint, amount float64) error
 
@@ -265,6 +266,21 @@ func (r *analyticsRepository) AddWatchTime(contentID uint, seconds float64) erro
 			seconds,
 		),
 	}).Error
+}
+
+// UpdateCompletionRate 根据当前平均观看时长与视频总时长更新完成率（0-1）
+func (r *analyticsRepository) UpdateCompletionRate(contentID uint, contentDuration float64) error {
+	if contentDuration <= 0 {
+		return nil
+	}
+	analytics, err := r.getOrCreateAnalytics(contentID)
+	if err != nil {
+		return err
+	}
+	return r.db.Model(analytics).UpdateColumn(
+		"completion_rate",
+		gorm.Expr("LEAST((total_watch_time / NULLIF(play_count, 0)) / ?, 1.0)", contentDuration),
+	).Error
 }
 
 // IncrementPurchaseCount 增加购买次数

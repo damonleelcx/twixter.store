@@ -58,6 +58,8 @@ type ContentService interface {
 
 	// RecordView 记录内容观看
 	RecordView(contentID uint, userID uint) error
+	// RecordWatchProgress 记录观看进度（增加 TotalWatchTime、AverageWatchTime、CompletionRate）
+	RecordWatchProgress(contentID uint, userID uint, watchTimeSeconds float64, contentDurationSeconds float64) error
 
 	// GetContentAnalytics 获取内容分析数据
 	GetContentAnalytics(contentID uint, startDate, endDate string) (map[string]interface{}, error)
@@ -476,6 +478,34 @@ func (s *contentService) RecordView(contentID uint, userID uint) error {
 		return fmt.Errorf("failed to increment play count: %w", err)
 	}
 
+	return nil
+}
+
+// RecordWatchProgress 记录观看进度（在视频流播放时由前端上报）
+func (s *contentService) RecordWatchProgress(contentID uint, userID uint, watchTimeSeconds float64, contentDurationSeconds float64) error {
+	if watchTimeSeconds <= 0 {
+		return nil
+	}
+	// 检查内容存在且用户可观看（可选，避免未购买用户刷数据）
+	_, err := s.contentRepo.GetByID(contentID)
+	if err != nil {
+		return fmt.Errorf("content not found: %w", err)
+	}
+	canView, err := s.UserCanViewContent(userID, contentID)
+	if err != nil {
+		return fmt.Errorf("user cannot view content: %w", err)
+	}
+	if !canView {
+		return errors.New("insufficient permissions to view content")
+	}
+	if err := s.analyticsRepo.AddWatchTime(contentID, watchTimeSeconds); err != nil {
+		return fmt.Errorf("failed to add watch time: %w", err)
+	}
+	if contentDurationSeconds > 0 {
+		if err := s.analyticsRepo.UpdateCompletionRate(contentID, contentDurationSeconds); err != nil {
+			return fmt.Errorf("failed to update completion rate: %w", err)
+		}
+	}
 	return nil
 }
 

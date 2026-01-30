@@ -4,6 +4,7 @@ import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
+import { Suspense } from "react";
 
 const SITE_NAME = "Twixter";
 
@@ -60,7 +61,9 @@ export default async function ExplorePage({ params }: Props) {
       <div className="mx-auto flex max-w-[1280px]">
         <LeftSidebar locale={locale} />
         <main className="min-w-0 flex-1 border-x border-[var(--border)] md:max-w-[600px]">
-          <ExploreContent />
+          <Suspense fallback={<div className="p-4 text-[var(--muted)]">Loading…</div>}>
+            <ExploreContent />
+          </Suspense>
         </main>
         <RightSidebarWrapper />
       </div>

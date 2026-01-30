@@ -4,10 +4,11 @@ const REFRESH_TOKEN_KEY = "twixter_refresh_token";
 export const AUTH_TOKEN_COOKIE = "twixter_token";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
-/** Prefer relative /api so Next.js rewrites proxy to backend; set NEXT_PUBLIC_API_URL for direct backend URL (e.g. production). */
+/** Prefer relative /api so Next.js rewrites proxy to backend; set NEXT_PUBLIC_API_URL for direct backend URL (e.g. production). No trailing slash. */
 export function getApiBase(): string {
   if (typeof window !== "undefined") {
-    const base = process.env.NEXT_PUBLIC_API_URL || "";
+    const raw = process.env.NEXT_PUBLIC_API_URL || "";
+    const base = raw.replace(/\/+$/, "");
     return base ? `${base}/api` : "/api";
   }
   return "/api";
@@ -639,6 +640,25 @@ export async function removeBookmark(contentId: number): Promise<void> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || "Failed to remove bookmark");
+}
+
+/** Record watch progress for analytics (TotalWatchTime, AverageWatchTime, CompletionRate). Requires auth. */
+export async function recordWatchProgress(
+  contentId: number,
+  watchTimeSeconds: number,
+  durationSeconds?: number
+): Promise<void> {
+  const base = getApiBase();
+  const body: { watch_time_seconds: number; duration_seconds?: number } = {
+    watch_time_seconds: watchTimeSeconds,
+  };
+  if (durationSeconds != null && durationSeconds > 0) body.duration_seconds = durationSeconds;
+  const res = await fetchWithAuth(`${base}/content/${contentId}/watch-progress`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Failed to record watch progress");
 }
 
 /** Fetch user's bookmarked content (Bookmarks page). Requires auth. */

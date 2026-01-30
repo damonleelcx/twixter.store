@@ -269,6 +269,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
           {item.purchased && item.first_file_id ? (
             <HlsPlayer
               fileId={item.first_file_id}
+              contentId={item.id}
               className="block w-full h-auto object-contain"
               poster={previewSrc ?? undefined}
               playLabel={tPost("playVideo")}
