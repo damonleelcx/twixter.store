@@ -195,10 +195,10 @@ func InitControllers(services *Services, repos *Repositories) *Controllers {
 // InitMiddleware 初始化中间件
 func InitMiddleware(redisClient *redis.Client) *middleware.CacheMiddleware {
 	// 初始化 Redis 限流器
-	middleware.DefaultRateLimiter = middleware.NewRedisRateLimiter(redisClient, 100, 1*time.Minute)
-	middleware.StrictRateLimiter = middleware.NewRedisRateLimiter(redisClient, 10, 1*time.Minute)
-	middleware.AuthRateLimiter = middleware.NewRedisRateLimiter(redisClient, 20, 1*time.Minute)
-	middleware.RefreshRateLimiter = middleware.NewRedisRateLimiter(redisClient, 60, 1*time.Minute)
+	middleware.DefaultRateLimiter = middleware.NewRedisRateLimiter(redisClient, 1000, 1*time.Minute)
+	middleware.StrictRateLimiter = middleware.NewRedisRateLimiter(redisClient, 100, 1*time.Minute)
+	middleware.AuthRateLimiter = middleware.NewRedisRateLimiter(redisClient, 100, 1*time.Minute)
+	middleware.RefreshRateLimiter = middleware.NewRedisRateLimiter(redisClient, 100, 1*time.Minute)
 
 	// 初始化 Redis 缓存中间件
 	cacheMiddleware := middleware.NewCacheMiddleware(redisClient, "api_cache:", 5*time.Minute)
