@@ -3,10 +3,8 @@ package middleware
 import (
 	"backend/entity"
 	"backend/repository"
-	"encoding/base64"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,41 +13,23 @@ import (
 const ViewingCookieName = "twixter_viewing"
 const viewingCookieMaxAge = 365 * 24 * 60 * 60 // 365 days
 
-// ViewingCookieFromRequest 从请求中读取 twixter_viewing cookie（已解码的值）
+// ViewingCookieFromRequest 从请求中读取 twixter_viewing cookie（加密值），解密后返回 viewing_light 或 viewing_dark
 func ViewingCookieFromRequest(c *gin.Context) string {
 	val, _ := c.Cookie(ViewingCookieName)
-	val = strings.TrimSpace(val)
-	if val == "viewing_light" || val == "viewing_dark" {
-		return val
-	}
-	return ""
+	return DecryptViewingToken(val)
 }
 
-// DecodeViewingParam 解码 query ?viewing= 的 base64 值，返回 viewing_light 或 viewing_dark，无效则返回空
+// DecodeViewingParam 解密 query ?viewing= 的 token（加密或旧格式），返回 viewing_light 或 viewing_dark
 func DecodeViewingParam(token string) string {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return ""
-	}
-	decoded, err := base64.StdEncoding.DecodeString(token)
-	if err != nil {
-		return ""
-	}
-	s := string(decoded)
-	if s == "viewing_light" || s == "viewing_dark" {
-		return s
-	}
-	return ""
+	return DecryptViewingToken(token)
 }
 
-// ViewingCookieMiddleware 若 query 带 ?viewing=<base64>，解码并设置 cookie twixter_viewing
+// ViewingCookieMiddleware 若 query 带 ?viewing=<token>，将 token 原样写入 cookie（前端/分享链接传的是加密 token）
 func ViewingCookieMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.Query("viewing")
-		if token != "" {
-			if decoded := DecodeViewingParam(token); decoded != "" {
-				c.SetCookie(ViewingCookieName, decoded, viewingCookieMaxAge, "/", "", false, false)
-			}
+		if token != "" && DecryptViewingToken(token) != "" {
+			c.SetCookie(ViewingCookieName, token, viewingCookieMaxAge, "/", "", false, false)
 		}
 		c.Next()
 	}

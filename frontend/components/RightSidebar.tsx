@@ -1,18 +1,28 @@
 "use client";
 
-import { fetchCurrentUser, type CurrentUser } from "@/lib/api";
+import {
+  fetchCurrentUser,
+  fetchTrendingTags,
+  type CurrentUser,
+  type TrendingTagItem,
+} from "@/lib/api";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { trendCounts, trendTags } from "./constants";
 
-export function RightSidebar() {
+type RightSidebarProps = {
+  /** SSR 传入的热门标签；未传时在客户端按权限请求 */
+  initialTrendingTags?: TrendingTagItem[] | null;
+};
+
+export function RightSidebar({ initialTrendingTags }: RightSidebarProps) {
   const params = useParams();
   const locale = (params?.locale as string) || "en";
   const tSidebar = useTranslations("sidebar");
   const tAuth = useTranslations("auth");
   const [user, setUser] = useState<CurrentUser | null | undefined>(undefined);
+  const [clientTrending, setClientTrending] = useState<TrendingTagItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,8 +34,22 @@ export function RightSidebar() {
     };
   }, []);
 
+  useEffect(() => {
+    if (initialTrendingTags != null) return;
+    let cancelled = false;
+    const category = user === undefined ? "light" : (user?.permissions?.includes("can_view_nsfw") ? "all" : "light");
+    fetchTrendingTags(category, 10).then((list) => {
+      if (!cancelled) setClientTrending(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialTrendingTags, user]);
+
   const walletBalance = user != null && typeof user.wallet_balance === "number" ? user.wallet_balance : null;
   const hasActiveMembership = user != null && user.membership_status === "active";
+
+  const trendingTags = initialTrendingTags ?? clientTrending;
 
   return (
     <aside className="sticky top-0 hidden h-screen w-[350px] shrink-0 overflow-y-auto p-4 xl:block">
@@ -72,20 +96,20 @@ export function RightSidebar() {
       <div className="mt-4 rounded-2xl bg-[var(--hover)] p-4">
         <h2 className="text-xl font-bold">{tSidebar("whatsHappening")}</h2>
         <div className="mt-3 space-y-3">
-          {trendTags.map((tag, i) => (
-            <a
-              key={tag}
-              href="#"
+          {trendingTags.map((t) => (
+            <Link
+              key={t.id}
+              href={`/${locale}/tag/${encodeURIComponent(t.slug || t.name)}`}
               className="block rounded-lg p-2 hover:bg-[var(--border)]/50"
             >
               <span className="text-sm text-[var(--muted)]">
                 {tSidebar("trending")}
               </span>
-              <p className="font-bold">{tag}</p>
+              <p className="font-bold">#{t.name}</p>
               <span className="text-sm text-[var(--muted)]">
-                {tSidebar("posts", { count: trendCounts[i] })}
+                {tSidebar("posts", { count: t.post_count })}
               </span>
-            </a>
+            </Link>
           ))}
         </div>
       </div>

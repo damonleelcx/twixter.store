@@ -2,6 +2,7 @@
 
 import {
   addBookmark,
+  fetchCurrentUser,
   getAccessToken,
   getApiBase,
   getContentById,
@@ -16,6 +17,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HlsPlayer } from "./HlsPlayer";
+import { VerticalAspectImage } from "./VerticalAspectImage";
 
 /** Format created_at to Twitter-style relative time */
 function formatTimestamp(iso: string): string {
@@ -56,13 +58,20 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
   const [bookmarked, setBookmarked] = useState(() => initialData?.content?.bookmarked ?? false);
   const [bookmarking, setBookmarking] = useState(false);
   const [blurredPreviewUrl, setBlurredPreviewUrl] = useState<string | null>(null);
+  const [canEditContent, setCanEditContent] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    fetchCurrentUser().then((user) => {
+      setCanEditContent((user?.permissions ?? []).includes("can_edit_content"));
+    });
+  }, []);
+
+  const load = useCallback(async (bypassCache?: boolean) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await getContentById(contentId, viewingToken);
+      const res = await getContentById(contentId, viewingToken, bypassCache ? { cache: "no-store" } : undefined);
       setData(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -79,6 +88,14 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
       load();
     }
   }, [initialData, load]);
+
+  // After redirect from edit page (?updated=1), refetch with no-store so the detail shows latest data
+  useEffect(() => {
+    if (searchParams.get("updated") === "1") {
+      load(true);
+      router.replace(`/${locale}/post/${contentId}`, { scroll: false });
+    }
+  }, [contentId, locale, load, router, searchParams]);
 
   // Sync bookmarked from loaded content
   useEffect(() => {
@@ -223,8 +240,8 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
         </button>
         <button
           type="button"
-          onClick={() => {
-            const url = buildShareUrl(
+          onClick={async () => {
+            const url = await buildShareUrl(
               typeof window !== "undefined" ? window.location.origin : "",
               locale,
               contentId,
@@ -285,27 +302,42 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
                 {content.description}
               </p>
             )}
+            {/* 4) Tags (clickable → tag feed) */}
+            {Array.isArray(content.tags) && content.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {content.tags.map((tag) => (
+                  <Link
+                    key={tag}
+                    href={`/${locale}/tag/${encodeURIComponent(tag)}`}
+                    className="inline-flex items-center rounded-full bg-[var(--muted)]/30 px-3 py-1 text-sm text-[var(--foreground)] hover:bg-[var(--muted)]/50 hover:text-[var(--accent)]"
+                  >
+                    #{tag}
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="mt-3 relative rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20 min-h-[200px] max-h-[70vh] flex justify-center items-center">
+        <div className="mt-3 relative w-full rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20 min-h-[200px]">
           {purchased && firstFile ? (
             <HlsPlayer
               fileId={firstFile.id}
-              className="max-w-full max-h-[70vh] w-auto h-auto object-contain"
+              className="block w-full h-auto object-contain"
               poster={blurredPreviewUrl ?? firstFile.gif_file_url ?? undefined}
               playLabel={t("playVideo")}
+              verticalAspectFactor={1.5}
             />
           ) : (
             <>
               {(blurredPreviewUrl || firstFile?.gif_file_url) ? (
-                <img
+                <VerticalAspectImage
                   src={blurredPreviewUrl ?? firstFile.gif_file_url ?? ""}
-                  alt=""
-                  className="max-w-full max-h-[70vh] w-auto h-auto object-contain"
+                  className="block w-full h-auto object-contain"
+                  factor={1.5}
                 />
               ) : (
-                <div className="min-h-[200px] w-full flex items-center justify-center">
+                <div className="absolute inset-0 min-h-[200px] flex items-center justify-center">
                   <div className="w-16 h-16 rounded-full bg-[var(--foreground)]/80 flex items-center justify-center">
                     <svg
                       className="w-8 h-8 text-white ml-1"
@@ -335,7 +367,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
                   </button>
                 ) : (
                   <Link
-                    href={`/${locale}/auth/signup?viewing=${content.category === "dark" ? "viewing_dark" : "viewing_light"}`}
+                    href={`/${locale}/auth/signup`}
                     className="mt-4 rounded-lg bg-[var(--accent)] px-6 py-2 text-sm font-medium text-[var(--accent-foreground)] hover:opacity-90"
                   >
                     {t("signUpToView")}
@@ -345,6 +377,21 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
             </>
           )}
         </div>
+        {canEditContent && (
+          <div className="mt-3 px-0">
+            <Link
+              href={`/${locale}/post/${contentId}/edit`}
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+              aria-label={t("edit")}
+            >
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              {t("edit")}
+            </Link>
+          </div>
+        )}
       </article>
     </>
   );

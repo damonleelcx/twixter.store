@@ -1,9 +1,10 @@
 import { LeftSidebar } from "@/components/LeftSidebar";
 import { MainFeedWithTabs } from "@/components/MainFeedWithTabs";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
-import { RightSidebar } from "@/components/RightSidebar";
-import { fetchContentFeedServer } from "@/lib/api";
+import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
+import { AUTH_TOKEN_COOKIE, fetchContentFeedServer } from "@/lib/api";
 import { setRequestLocale } from "next-intl/server";
+import { cookies } from "next/headers";
 
 type Props = {
   params: Promise<{ locale: string }>;
@@ -13,7 +14,9 @@ export default async function Home({ params }: Props) {
   const { locale } = await params;
   setRequestLocale(locale);
 
-  const initialForYouFeed = await fetchContentFeedServer("light", 0, 20).catch(
+  const cookieStore = await cookies();
+  const token = cookieStore.get(AUTH_TOKEN_COOKIE)?.value;
+  const initialForYouFeed = await fetchContentFeedServer("light", 0, 20, token).catch(
     () => ({ items: [], next_cursor: 0, has_more: false })
   );
 
@@ -24,7 +27,7 @@ export default async function Home({ params }: Props) {
         <main className="min-w-0 flex-1 border-x border-[var(--border)] md:max-w-[600px]">
           <MainFeedWithTabs initialForYouFeed={initialForYouFeed} />
         </main>
-        <RightSidebar />
+        <RightSidebarWrapper />
       </div>
       <MobileBottomNav />
     </div>

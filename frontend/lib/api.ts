@@ -161,12 +161,22 @@ export async function fetchCurrentUser(): Promise<CurrentUser | null> {
   }
 }
 
+/** Fetch encrypted viewing token for URL/cookie (mode=light|dark). Backend-only decrypts. */
+export async function fetchViewingToken(mode: "light" | "dark"): Promise<string> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/content/viewing-token?mode=${mode}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Failed to get viewing token");
+  return typeof data?.token === "string" ? data.token : "";
+}
+
 export async function authApiRegister(body: {
   email: string;
   password: string;
   username?: string;
   referral_code?: string;
-  viewing: "viewing_light" | "viewing_dark";
+  viewing?: "viewing_light" | "viewing_dark";
+  viewing_token?: string;
 }): Promise<{ user: unknown; session: { access_token: string; refresh_token?: string } }> {
   const base = getApiBase();
   const res = await fetch(`${base}/auth/register`, {
@@ -346,7 +356,7 @@ export async function authApiLogout(): Promise<void> {
 
 export type TagOption = { id: number; name: string; slug: string };
 
-/** Content feed item from list API (author, timestamp, purchased, bookmarked, preview gif). */
+/** Content feed item from list API (author, timestamp, tags, purchased, bookmarked, preview gif). */
 export type ContentFeedItem = {
   id: number;
   name: string;
@@ -360,6 +370,7 @@ export type ContentFeedItem = {
   created_at: string;
   author_username: string;
   author_avatar?: string;
+  tags?: string[];
 };
 
 /** Content detail from GET /content/:id (with files, purchased, bookmarked, price, author). */
@@ -377,6 +388,7 @@ export type ContentDetail = {
     bookmarked?: boolean;
     author_username?: string;
     author_avatar?: string;
+    tags?: string[];
   };
   files: Array<{
     id: number;
@@ -393,10 +405,14 @@ export type ContentDetail = {
 };
 
 /** Get content by id. Auth or viewing_dark cookie for dark. Optional viewing param for unauthenticated dark access. */
-export async function getContentById(id: number, viewingToken?: string | null): Promise<ContentDetail> {
+export async function getContentById(
+  id: number,
+  viewingToken?: string | null,
+  options?: { cache?: RequestCache }
+): Promise<ContentDetail> {
   const base = getApiBase();
   const url = viewingToken ? `${base}/content/${id}?viewing=${encodeURIComponent(viewingToken)}` : `${base}/content/${id}`;
-  const res = await fetchWithAuth(url);
+  const res = await fetchWithAuth(url, { cache: options?.cache });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error || data?.details || res.statusText || "Content not found");
@@ -419,6 +435,79 @@ export async function getContentByIdServer(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return null;
   return data as ContentDetail;
+}
+
+/** Admin video analytics (requires can_view_analytics). */
+export type AdminVideoAnalytics = {
+  start_date: string;
+  end_date: string;
+  total_views: number;
+  total_play_count: number;
+  total_watch_time: number;
+  top_contents: Array<{
+    content_id: number;
+    name: string;
+    total_views: number;
+    total_play_count: number;
+    total_watch_time: number;
+    total_revenue: number;
+  }>;
+};
+
+export async function fetchAdminVideoAnalytics(
+  startDate?: string,
+  endDate?: string
+): Promise<AdminVideoAnalytics> {
+  const base = getApiBase();
+  const params = new URLSearchParams();
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  const q = params.toString();
+  const url = q ? `${base}/admin/analytics/video?${q}` : `${base}/admin/analytics/video`;
+  const res = await fetchWithAuth(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || data?.details || "Failed to load video analytics");
+  return data as AdminVideoAnalytics;
+}
+
+/** Admin revenue analytics (requires can_view_analytics). */
+export type AdminRevenueAnalytics = {
+  start_date: string;
+  end_date: string;
+  content_revenue: number;
+  credits_revenue: number;
+  total_revenue: number;
+};
+
+export async function fetchAdminRevenueAnalytics(
+  startDate?: string,
+  endDate?: string
+): Promise<AdminRevenueAnalytics> {
+  const base = getApiBase();
+  const params = new URLSearchParams();
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  const q = params.toString();
+  const url = q ? `${base}/admin/analytics/revenue?${q}` : `${base}/admin/analytics/revenue`;
+  const res = await fetchWithAuth(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || data?.details || "Failed to load revenue analytics");
+  return data as AdminRevenueAnalytics;
+}
+
+/** Update content metadata (requires can_edit_content). */
+export async function updateContent(
+  contentId: number,
+  body: { name: string; description: string; category: "light" | "dark"; price: number; tags: string[] }
+): Promise<void> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/content/${contentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || data?.details || "Failed to update content");
 }
 
 /** Read access token from cookie string (for server: pass request cookies). */
@@ -455,7 +544,72 @@ export async function fetchContentFeed(
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/content/list?${params}`, { headers });
+  const res = await fetch(`${base}/content/list?${params}`, {
+    headers,
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
+  }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    next_cursor: typeof data?.next_cursor === "number" ? data.next_cursor : cursor + 1,
+    has_more: Boolean(data?.has_more),
+  };
+}
+
+/** Fetch content feed by tag name. Same response shape as fetchContentFeed. */
+export async function fetchContentFeedByTag(
+  tag: string,
+  cursor: number,
+  limit = 20
+): Promise<ContentFeedResponse> {
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    tag: tag.trim(),
+    cursor: String(cursor),
+    limit: String(limit),
+  });
+  const headers: HeadersInit = {};
+  const token = getAccessToken();
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}/content/list?${params}`, {
+    headers,
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
+  }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    next_cursor: typeof data?.next_cursor === "number" ? data.next_cursor : cursor + 1,
+    has_more: Boolean(data?.has_more),
+  };
+}
+
+/** Fetch content feed by search query (fuzzy name/description). category "" = all. */
+export async function fetchContentFeedSearch(
+  q: string,
+  category: "light" | "dark" | "",
+  cursor: number,
+  limit = 20
+): Promise<ContentFeedResponse> {
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    cursor: String(cursor),
+    limit: String(limit),
+  });
+  if (q.trim()) params.set("q", q.trim());
+  if (category) params.set("category", category);
+  const headers: HeadersInit = {};
+  const token = getAccessToken();
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${base}/content/list?${params}`, {
+    headers,
+    cache: "no-store",
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
@@ -539,11 +693,55 @@ export function getServerApiBase(): string {
   return base.startsWith("http") ? `${base}/api` : `http://${base}/api`;
 }
 
-/** Server-side fetch for content feed (no auth; for SSR initial "For you" feed). */
+/** Server-only: fetch current user using token (e.g. from cookies().get(AUTH_TOKEN_COOKIE)?.value). Returns null if no token or API error. */
+export async function fetchCurrentUserServer(
+  token: string | undefined | null
+): Promise<CurrentUser | null> {
+  const base = getServerApiBase();
+  if (!base || !token) return null;
+  try {
+    const res = await fetch(`${base}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.user ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Trending tag item from /api/tags/trending */
+export type TrendingTagItem = { id: number; name: string; slug: string; post_count: number };
+
+/** Server-only: fetch trending tags. category=light for light content only; category=all requires can_view_nsfw (pass token). */
+export async function fetchTrendingTagsServer(
+  category: "light" | "all",
+  limit = 10,
+  token?: string | null
+): Promise<TrendingTagItem[]> {
+  const base = getServerApiBase();
+  if (!base) return [];
+  const params = new URLSearchParams({ category, limit: String(limit) });
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${base}/tags/trending?${params}`, { headers, cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.tags) ? data.tags : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Server-side fetch for content feed. Pass token from cookie when user is signed in so purchased is correct. */
 export async function fetchContentFeedServer(
   category: "light" | "dark",
   cursor: number,
-  limit = 20
+  limit = 20,
+  token?: string | null
 ): Promise<ContentFeedResponse> {
   const base = getServerApiBase();
   if (!base) return { items: [], next_cursor: 0, has_more: false };
@@ -552,9 +750,11 @@ export async function fetchContentFeedServer(
     cursor: String(cursor),
     limit: String(limit),
   });
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${base}/content/list?${params}`, {
     cache: "no-store",
-    headers: { "Content-Type": "application/json" },
+    headers,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -577,6 +777,26 @@ export async function searchTags(
     const params = new URLSearchParams({ limit: String(limit) });
     if (q.trim()) params.set("q", q.trim());
     const res = await fetchWithAuth(`${base}/tags/search?${params}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.tags) ? data.tags : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Client: fetch trending tags. category=all requires can_view_nsfw (use when user has permission). */
+export async function fetchTrendingTags(
+  category: "light" | "all",
+  limit = 10
+): Promise<TrendingTagItem[]> {
+  const base = getApiBase();
+  const params = new URLSearchParams({ category, limit: String(limit) });
+  const headers: HeadersInit = {};
+  const token = getAccessToken();
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${base}/tags/trending?${params}`, { headers, cache: "no-store" });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data?.tags) ? data.tags : [];

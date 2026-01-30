@@ -8,8 +8,8 @@ import { useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
 /**
- * When user lands on a shared link with ?viewing_dark (e.g. post detail),
- * persist to cookie so registration/signup keeps dark account type.
+ * When user lands on a shared link with ?viewing=<encrypted token> (e.g. post detail),
+ * persist token to cookie so registration/signup can send viewing_token (backend decrypts).
  */
 export function SaveViewingFromUrl() {
   const searchParams = useSearchParams();

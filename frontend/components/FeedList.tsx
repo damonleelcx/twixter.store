@@ -1,7 +1,7 @@
 "use client";
 
 import type { ContentFeedItem, ContentFeedResponse } from "@/lib/api";
-import { fetchContentFeed } from "@/lib/api";
+import { fetchContentFeed, getAccessToken } from "@/lib/api";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContentCard } from "./ContentCard";
@@ -29,6 +29,7 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const initialForYouRef = useRef(initialForYouFeed);
+  const hasRefetchedForYouWithAuth = useRef(false);
 
   const category = activeTab === "forYou" ? "light" : "dark";
 
@@ -48,7 +49,14 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
           pageCursor,
           PAGE_SIZE
         );
-        setItems((prev) => (append ? [...prev, ...nextItems] : nextItems));
+        setItems((prev) => {
+          if (append) return [...prev, ...nextItems];
+          // 替换时保留之前已标记为已购买的状态，避免 refetch 覆盖刚购买后的 optimistic 更新
+          return nextItems.map((i) => ({
+            ...i,
+            purchased: i.purchased || (prev.find((p) => p.id === i.id)?.purchased ?? false),
+          }));
+        });
         setCursor(next_cursor);
         setHasMore(has_more);
       } catch (err) {
@@ -92,6 +100,28 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
         loadPage(0, false);
       }
     }
+  }, [activeTab, loadPage]);
+
+  // After returning from post edit, refetch current tab so list shows updated content
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem("twixter_feed_refetch") === "1") {
+      sessionStorage.removeItem("twixter_feed_refetch");
+      loadPage(0, false);
+    }
+  }, [loadPage]);
+
+  // SSR 拉取 light 列表时无 auth，purchased 全为 false。用户已登录时在客户端用 token 再拉一次以拿到正确 purchased
+  useEffect(() => {
+    if (
+      activeTab !== "forYou" ||
+      !initialForYouRef.current ||
+      hasRefetchedForYouWithAuth.current ||
+      !getAccessToken()
+    )
+      return;
+    hasRefetchedForYouWithAuth.current = true;
+    loadPage(0, false);
   }, [activeTab, loadPage]);
 
   const loadMore = useCallback(() => {

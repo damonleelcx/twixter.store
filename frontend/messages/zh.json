@@ -9,6 +9,7 @@
     "profile": "个人",
     "post": "发帖",
     "adminUpload": "管理员上传",
+    "adminAnalytics": "数据分析",
     "subscribe": "订阅"
   },
   "library": {
@@ -31,7 +32,10 @@
     "loading": "加载中...",
     "allCaughtUp": "已经到底了",
     "unlockToView": "购买后解锁",
-    "credits": "积分"
+    "credits": "积分",
+    "search": "搜索",
+    "searchPlaceholder": "按名称或描述搜索内容...",
+    "tagFeedHint": "带此标签的内容"
   },
   "compose": {
     "media": "媒体",
@@ -70,6 +74,13 @@
     "like": "喜欢",
     "share": "分享",
     "bookmark": "书签",
+    "edit": "编辑",
+    "editTitle": "编辑内容",
+    "editSave": "保存",
+    "editSaving": "保存中…",
+    "editSuccess": "内容已更新。",
+    "editErrorNotFound": "内容不存在。",
+    "editErrorNoPermission": "您没有编辑内容的权限。",
     "showReplies": "显示回复",
     "unlockToView": "购买后解锁",
     "credits": "积分",
@@ -131,7 +142,11 @@
     "processing": "处理中…",
     "payNow": "支付",
     "backToPlans": "返回套餐",
-    "orPayWithPayPal": "或使用其他方式支付"
+    "orPayWithPayPal": "或使用其他方式支付",
+    "shareableProfileLink": "可分享的个人链接",
+    "shareableProfileHint": "分享此链接后，他人注册时会自动带上你的推荐码。推荐他人注册成功即可获得积分。",
+    "copyLink": "复制链接",
+    "copied": "已复制！"
   },
   "purchaseReturn": {
     "verifyingTitle": "正在验证支付...",
@@ -145,9 +160,40 @@
   },
   "meta": {
     "title": "Twixter - 首页",
-    "description": "全新的社交体验"
+    "description": "全新的社交体验",
+    "exploreTitle": "探索 | Twixter",
+    "exploreDescription": "在 Twixter 发现与搜索内容",
+    "tagTitle": "标签「{tag}」的内容 | Twixter",
+    "tagDescription": "在 Twixter 浏览带标签「{tag}」的内容"
   },
   "admin": {
+    "analytics": {
+      "title": "数据分析",
+      "subtitle": "查看视频与收入分析，仅拥有分析权限的用户可访问。",
+      "loading": "加载中...",
+      "back": "返回",
+      "videoAnalytics": "视频分析",
+      "videoAnalyticsDesc": "播放量、观看时长、热门内容",
+      "revenueAnalytics": "收入分析",
+      "revenueAnalyticsDesc": "内容收入、积分购买、总收入",
+      "startDate": "开始日期",
+      "endDate": "结束日期",
+      "apply": "应用",
+      "totalViews": "总观看次数",
+      "totalPlayCount": "总播放次数",
+      "totalWatchTime": "总观看时长",
+      "topContents": "按观看量排序的热门内容",
+      "content": "内容",
+      "views": "观看",
+      "plays": "播放",
+      "watchTime": "观看时长",
+      "revenue": "收入",
+      "noData": "该时段暂无数据",
+      "period": "时段",
+      "contentRevenue": "内容收入（积分）",
+      "creditsRevenue": "积分购买（实付）",
+      "totalRevenue": "总收入"
+    },
     "upload": {
       "title": "批量上传视频",
       "back": "返回首页",

@@ -24,37 +24,38 @@ type Services struct {
 
 // Controllers 包含所有初始化的控制器
 type Controllers struct {
-	AuthController     *controller.AuthController
-	ContentController  *controller.ContentController
-	PurchaseController *controller.PurchaseController
+	AuthController      *controller.AuthController
+	ContentController   *controller.ContentController
+	PurchaseController  *controller.PurchaseController
+	AnalyticsController *controller.AnalyticsController
 }
 
 // Repositories 包含所有初始化的仓库
 type Repositories struct {
-	UserRepo           repository.UserRepository
-	SessionRepo        repository.SessionRepository
-	UserPermissionRepo repository.UserPermissionRepository
-	WalletRepo         repository.WalletRepository
-	PurchaseRepo       repository.PurchaseRepository
-	ContentRepo        repository.ContentRepository
-	ContentFileRepo    repository.ContentFileRepository
-	TagRepo            repository.TagRepository
-	ContentTagRepo     repository.ContentTagRepository
+	UserRepo            repository.UserRepository
+	SessionRepo         repository.SessionRepository
+	UserPermissionRepo  repository.UserPermissionRepository
+	WalletRepo          repository.WalletRepository
+	PurchaseRepo        repository.PurchaseRepository
+	ContentRepo         repository.ContentRepository
+	ContentFileRepo     repository.ContentFileRepository
+	TagRepo             repository.TagRepository
+	ContentTagRepo      repository.ContentTagRepository
 	ContentBookmarkRepo repository.ContentBookmarkRepository
-	AnalyticsRepo      repository.AnalyticsRepository
+	AnalyticsRepo       repository.AnalyticsRepository
 }
 
 // InitRepositories 初始化所有仓库
 func InitRepositories(db *gorm.DB) *Repositories {
 	return &Repositories{
-		UserRepo:           repository.NewUserRepository(db),
-		SessionRepo:        repository.NewSessionRepository(db),
-		UserPermissionRepo: repository.NewUserPermissionRepository(db),
-		WalletRepo:         repository.NewWalletRepository(db),
-		PurchaseRepo:       repository.NewPurchaseRepository(db),
-		ContentRepo:        repository.NewContentRepository(db),
-		ContentFileRepo:    repository.NewContentFileRepository(db),
-		TagRepo:            repository.NewTagRepository(db),
+		UserRepo:            repository.NewUserRepository(db),
+		SessionRepo:         repository.NewSessionRepository(db),
+		UserPermissionRepo:  repository.NewUserPermissionRepository(db),
+		WalletRepo:          repository.NewWalletRepository(db),
+		PurchaseRepo:        repository.NewPurchaseRepository(db),
+		ContentRepo:         repository.NewContentRepository(db),
+		ContentFileRepo:     repository.NewContentFileRepository(db),
+		TagRepo:             repository.NewTagRepository(db),
 		ContentTagRepo:      repository.NewContentTagRepository(db),
 		ContentBookmarkRepo: repository.NewContentBookmarkRepository(db),
 		AnalyticsRepo:       repository.NewAnalyticsRepository(db),
@@ -180,6 +181,13 @@ func InitControllers(services *Services, repos *Repositories) *Controllers {
 			services.StripeService,
 		)
 	}
+
+	// 管理员分析控制器（需 can_view_analytics 权限）
+	controllers.AnalyticsController = controller.NewAnalyticsController(
+		repos.AnalyticsRepo,
+		repos.ContentRepo,
+		repos.PurchaseRepo,
+	)
 
 	return controllers
 }

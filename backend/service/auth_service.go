@@ -85,8 +85,8 @@ const (
 	PasswordResetTokenDuration = 1 * time.Hour
 
 	// Referral configuration
-	ReferralRewardCredits = 100 // 推荐奖励积分数量
-	ReferralCodeLength    = 8   // 推荐码长度
+	ReferralRewardCredits = 20 // 推荐奖励积分数量
+	ReferralCodeLength    = 8  // 推荐码长度
 )
 
 // hashPassword Hash password
@@ -712,7 +712,7 @@ func (s *authService) CheckAccountLocked(userID uint) (bool, error) {
 	return true, nil
 }
 
-// GetUserPermissionNames 获取用户权限名称列表
+// GetUserPermissionNames 获取用户权限名称列表（仅来自 user_permissions 表）
 func (s *authService) GetUserPermissionNames(userID uint) ([]string, error) {
 	permissions, err := s.userPermissionRepo.GetUserPermissions(userID)
 	if err != nil {

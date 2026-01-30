@@ -2,6 +2,7 @@ package controller
 
 import (
 	"backend/entity"
+	"backend/middleware"
 	"backend/service"
 	"net/http"
 
@@ -22,11 +23,12 @@ func NewAuthController(authService service.AuthService) *AuthController {
 
 // RegisterRequest Registration request
 type RegisterRequest struct {
-	Email        string `json:"email" binding:"required,email"`
-	Password     string `json:"password" binding:"required,min=8"`
-	Username     string `json:"username,omitempty"`                                          // 用户名（可选）
-	ReferralCode string `json:"referral_code,omitempty"`                                     // 推荐码（可选）
-	Viewing      string `json:"viewing" binding:"required,oneof=viewing_light viewing_dark"` // 查看类型：viewing_light 或 viewing_dark
+	Email         string `json:"email" binding:"required,email"`
+	Password      string `json:"password" binding:"required,min=8"`
+	Username      string `json:"username,omitempty"`       // 用户名（可选）
+	ReferralCode  string `json:"referral_code,omitempty"`  // 推荐码（可选）
+	Viewing       string `json:"viewing,omitempty"`       // 明文查看类型（可选，与 viewing_token 二选一）
+	ViewingToken  string `json:"viewing_token,omitempty"` // 加密的 viewing token（可选，解密后用于账户类型）
 }
 
 // LoginRequest Login request
@@ -80,9 +82,16 @@ func (ac *AuthController) Register(c *gin.Context) {
 
 	ipAddress := c.ClientIP()
 
-	// 根据 viewing 参数确定账户类型
+	// 根据 viewing_token（解密）或 viewing（明文）确定账户类型
+	viewing := req.Viewing
+	if req.ViewingToken != "" {
+		viewing = middleware.DecryptViewingToken(req.ViewingToken)
+	}
+	if viewing != "viewing_dark" && viewing != "viewing_light" {
+		viewing = "viewing_light"
+	}
 	var accountType entity.AccountType
-	if req.Viewing == "viewing_dark" {
+	if viewing == "viewing_dark" {
 		accountType = entity.AccountTypeDark
 	} else {
 		accountType = entity.AccountTypeLight

@@ -18,6 +18,8 @@ type ContentTagRepository interface {
 	RemoveTagFromContent(contentID, tagID uint) error
 	GetTagsByContentID(contentID uint) ([]entity.Tag, error)
 	GetContentsByTagID(tagID uint, limit, offset int) ([]entity.Content, error)
+	// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）
+	GetReadyContentsByTagID(tagID uint, limit, offset int) ([]entity.Content, error)
 
 	// 批量操作
 	AddTagsToContent(contentID uint, tagIDs []uint) error
@@ -117,6 +119,19 @@ func (r *contentTagRepository) GetContentsByTagID(tagID uint, limit, offset int)
 	query := r.db.Table("contents").
 		Joins("INNER JOIN content_tags ON contents.id = content_tags.content_id").
 		Where("content_tags.tag_id = ? AND content_tags.deleted_at IS NULL", tagID).
+		Limit(limit).Offset(offset).Order("contents.created_at DESC")
+	if err := query.Find(&contents).Error; err != nil {
+		return nil, err
+	}
+	return contents, nil
+}
+
+// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）
+func (r *contentTagRepository) GetReadyContentsByTagID(tagID uint, limit, offset int) ([]entity.Content, error) {
+	var contents []entity.Content
+	query := r.db.Table("contents").
+		Joins("INNER JOIN content_tags ON contents.id = content_tags.content_id").
+		Where("content_tags.tag_id = ? AND content_tags.deleted_at IS NULL AND contents.status = ? AND contents.deleted_at IS NULL", tagID, entity.ContentStatusReady).
 		Limit(limit).Offset(offset).Order("contents.created_at DESC")
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,15 @@ type VideoMetadata struct {
 // UploadVideosRequest 批量上传视频请求（用于表单解析）
 type UploadVideosRequest struct {
 	VideosJSON string `form:"videos" binding:"required"` // JSON 字符串，包含所有视频的元数据
+}
+
+// UpdateContentRequest 更新内容请求（PATCH）
+type UpdateContentRequest struct {
+	Name        string   `json:"name" binding:"required"`
+	Description string   `json:"description"`
+	Category    string   `json:"category" binding:"required,oneof=light dark"`
+	Price       float64  `json:"price" binding:"gte=0"`
+	Tags        []string `json:"tags"`
 }
 
 // UploadVideos 批量上传视频
@@ -260,6 +270,8 @@ func (cc *ContentController) GetContent(c *gin.Context) {
 		authorUsername = content.Name
 	}
 
+	tagNames, _ := cc.contentService.GetContentTagNames(id)
+
 	c.JSON(http.StatusOK, gin.H{
 		"content": gin.H{
 			"id":              content.ID,
@@ -274,20 +286,66 @@ func (cc *ContentController) GetContent(c *gin.Context) {
 			"bookmarked":      bookmarked,
 			"author_username": authorUsername,
 			"author_avatar":   authorAvatar,
+			"tags":            tagNames,
 		},
 		"files": fileResponses,
 	})
 }
 
-// ListContent 分页列出 feed 内容（按分类）。dark 分类由 RequireNSFWPermissionForDarkList 中间件校验。
-func (cc *ContentController) ListContent(c *gin.Context) {
-	category := c.DefaultQuery("category", "light")
-	if category != "light" && category != "dark" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "category must be light or dark",
+// GetViewingToken 返回用于 URL/cookie 的加密 viewing token（mode=dark|light），前端不持有密钥
+func (cc *ContentController) GetViewingToken(c *gin.Context) {
+	mode := c.DefaultQuery("mode", "light")
+	var plain string
+	if mode == "dark" {
+		plain = "viewing_dark"
+	} else {
+		plain = "viewing_light"
+	}
+	token := middleware.EncryptViewingToken(plain)
+	if token == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Viewing token not available",
 		})
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+// UpdateContent 更新内容元数据（需 can_edit_content 权限）
+func (cc *ContentController) UpdateContent(c *gin.Context) {
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid content ID"})
+		return
+	}
+	var req UpdateContentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data", "details": err.Error()})
+		return
+	}
+	if err := cc.contentService.UpdateContent(params.ID, req.Name, req.Description, req.Category, req.Price, req.Tags); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Content not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update content", "details": err.Error()})
+		return
+	}
+	if middleware.GlobalCacheMiddleware != nil {
+		middleware.GlobalCacheMiddleware.InvalidateContentCache(params.ID)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Content updated successfully"})
+}
+
+// ListContent 分页列出 feed 内容。支持按分类、按标签(tag)、或模糊搜索(q)。dark 分类由 RequireNSFWPermissionForDarkList 中间件校验。
+// ListFeedByTag 仅允许拥有 can_search_tags 权限的用户使用；搜索时无 can_view_nsfw 的用户只能搜 light 分类。
+func (cc *ContentController) ListContent(c *gin.Context) {
+	category := c.DefaultQuery("category", "light")
+	if category != "light" && category != "dark" {
+		category = ""
+	}
+	tag := strings.TrimSpace(c.Query("tag"))
+	q := strings.TrimSpace(c.Query("q"))
 	cursor, _ := strconv.Atoi(c.DefaultQuery("cursor", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	if limit <= 0 || limit > 50 {
@@ -295,10 +353,48 @@ func (cc *ContentController) ListContent(c *gin.Context) {
 	}
 	offset := cursor * limit
 	userID := uint(0)
-	if user, exists := middleware.GetUserFromContext(c); exists {
-		userID = user.ID
+	var user *entity.UserBase
+	if u, exists := middleware.GetUserFromContext(c); exists {
+		user = u
+		userID = u.ID
 	}
-	items, err := cc.contentService.ListFeed(category, userID, limit, offset)
+
+	// ListFeedByTag: only users with can_search_tags may use tag filter
+	if tag != "" {
+		if user == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Sign in required to search by tag"})
+			return
+		}
+		hasSearchTags, errPerm := cc.userPermissionRepo.HasPermission(user.ID, "can_search_tags")
+		if errPerm != nil || !hasSearchTags {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Permission required to search by tag (can_search_tags)"})
+			return
+		}
+	}
+
+	var items []service.ListFeedItem
+	var err error
+	if tag != "" {
+		items, err = cc.contentService.ListFeedByTag(tag, userID, limit, offset)
+	} else if q != "" {
+		// Search: users without can_view_nsfw get light only; users with can_view_nsfw search all categories
+		searchCategory := ""
+		if user == nil {
+			searchCategory = "light"
+		} else {
+			hasNSFW, _ := cc.userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
+			if !hasNSFW {
+				searchCategory = "light"
+			}
+			// hasNSFW: searchCategory stays "" so they search all content (light + dark)
+		}
+		items, err = cc.contentService.ListFeedSearch(q, searchCategory, userID, limit, offset)
+	} else {
+		if category == "" {
+			category = "light"
+		}
+		items, err = cc.contentService.ListFeed(category, userID, limit, offset)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to list content",
@@ -308,6 +404,7 @@ func (cc *ContentController) ListContent(c *gin.Context) {
 	}
 	nextCursor := cursor + 1
 	hasMore := len(items) == limit
+	c.Header("Cache-Control", "private, no-store")
 	c.JSON(http.StatusOK, gin.H{
 		"items":       items,
 		"next_cursor": nextCursor,
@@ -470,7 +567,7 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 		return
 	}
 
-	// 仅已购买或有效会员可观看视频流
+	// 已购买或有效会员可观看视频流（light 与 dark 内容均适用，UserCanViewContent 不区分 category）
 	user, hasUser := middleware.GetUserFromContext(c)
 	if !hasUser {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -508,7 +605,11 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 		return
 	}
 
-	// 请求的是 .m3u8 播放列表文件
+	// 请求的是 .m3u8 播放列表文件：记录观看（每次开始拉流时记一次，不记 .ts 分片请求）
+	if err := cc.contentService.RecordView(file.ContentID, user.ID); err == nil && middleware.GlobalCacheMiddleware != nil {
+		middleware.GlobalCacheMiddleware.InvalidateContentCache(file.ContentID)
+	}
+
 	// 从S3流式传输 .m3u8 文件
 	reader, _, err := cc.contentService.StreamFileFromS3(file.TranscodedFilePath)
 	if err != nil {

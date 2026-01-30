@@ -24,6 +24,8 @@ type ContentRepository interface {
 	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）
 	ListFeedByCategory(category string, limit, offset int) ([]entity.Content, error)
 	Search(keyword string, limit, offset int) ([]entity.Content, error)
+	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类
+	SearchReady(keyword string, category string, limit, offset int) ([]entity.Content, error)
 
 	// 统计操作
 	Count() (int64, error)
@@ -147,6 +149,23 @@ func (r *contentRepository) Search(keyword string, limit, offset int) ([]entity.
 	var contents []entity.Content
 	query := r.db.Where("name ILIKE ? OR description ILIKE ?", "%"+keyword+"%", "%"+keyword+"%").
 		Limit(limit).Offset(offset).Order("created_at DESC")
+	if err := query.Find(&contents).Error; err != nil {
+		return nil, err
+	}
+	return contents, nil
+}
+
+// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类
+func (r *contentRepository) SearchReady(keyword string, category string, limit, offset int) ([]entity.Content, error) {
+	var contents []entity.Content
+	query := r.db.Where("status = ?", entity.ContentStatusReady)
+	if keyword != "" {
+		query = query.Where("name ILIKE ? OR description ILIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	if category != "" && (category == "light" || category == "dark") {
+		query = query.Where("category = ?", category)
+	}
+	query = query.Limit(limit).Offset(offset).Order("created_at DESC")
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}

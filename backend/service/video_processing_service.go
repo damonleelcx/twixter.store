@@ -194,14 +194,14 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// 默认转码选项
+	// 默认转码选项（x264 preset 须为 ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|placebo，不能用 high）
 	if options == nil {
 		options = &TranscodeOptions{
 			Codec:      "libx264",
 			Bitrate:    "2000k",
 			Resolution: "1920x1080", // 默认转码到 1080p
 			Format:     "hls",
-			Quality:    "high",
+			Quality:    "medium",    // x264 preset：medium 平衡速度与质量
 		}
 	}
 

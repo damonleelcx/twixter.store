@@ -7,12 +7,13 @@ import {
   authApiLogout,
   clearTokens,
   fetchCurrentUser,
+  fetchViewingToken,
   type CurrentUser,
 } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -22,6 +23,8 @@ export default function ProfilePage() {
   const tNav = useTranslations("nav");
   const tFeed = useTranslations("feed");
   const [user, setUser] = useState<CurrentUser | null | undefined>(undefined);
+  const [shareableUrl, setShareableUrl] = useState<string | null>(null);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,6 +35,32 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, []);
+
+  // Build shareable signup link with referral code + encrypted viewing token (same account type as parent)
+  useEffect(() => {
+    if (!user?.referral_code) return;
+    const mode = user.account_type === "dark" ? "dark" : "light";
+    let cancelled = false;
+    fetchViewingToken(mode)
+      .then((token) => {
+        if (cancelled || !token) return;
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
+        const url = `${origin}/${locale}/auth/signup?ref=${encodeURIComponent(user.referral_code)}&viewing=${encodeURIComponent(token)}`;
+        setShareableUrl(url);
+      })
+      .catch(() => setShareableUrl(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.referral_code, user?.account_type, locale]);
+
+  const copyShareableLink = useCallback(() => {
+    if (!shareableUrl) return;
+    navigator.clipboard?.writeText(shareableUrl).then(() => {
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    });
+  }, [shareableUrl]);
 
   async function handleLogOut() {
     try {
@@ -109,6 +138,30 @@ export default function ProfilePage() {
                 >
                   {tNav("subscribe")}
                 </Link>
+              </div>
+              <div className="pt-4 border-t border-[var(--border)] mt-4">
+                <p className="text-sm font-medium text-[var(--foreground)]">{t("shareableProfileLink")}</p>
+                <p className="text-sm text-[var(--muted)] mt-1">{t("shareableProfileHint")}</p>
+                {shareableUrl ? (
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={shareableUrl}
+                      className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+                      aria-label={t("shareableProfileLink")}
+                    />
+                    <button
+                      type="button"
+                      onClick={copyShareableLink}
+                      className="shrink-0 rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--hover)]"
+                    >
+                      {copySuccess ? t("copied") : t("copyLink")}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-[var(--muted)]">…</p>
+                )}
               </div>
             </div>
             <button

@@ -1,7 +1,7 @@
 import { LeftSidebar } from "@/components/LeftSidebar";
 import { BookmarksList } from "@/components/BookmarksList";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
-import { RightSidebar } from "@/components/RightSidebar";
+import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 type Props = {
@@ -23,7 +23,7 @@ export default async function BookmarksPage({ params }: Props) {
           </header>
           <BookmarksList />
         </main>
-        <RightSidebar />
+        <RightSidebarWrapper />
       </div>
       <MobileBottomNav />
     </div>

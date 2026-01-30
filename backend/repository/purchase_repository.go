@@ -41,6 +41,7 @@ type PurchaseRepository interface {
 	CountByType(userID uint, purchaseType entity.PurchaseType) (int64, error)
 	CountByStatus(userID uint, status entity.PurchaseStatus) (int64, error)
 	GetTotalRevenue(purchaseType entity.PurchaseType) (float64, error)
+	GetTotalRevenueByDateRange(purchaseType entity.PurchaseType, startDate, endDate string) (float64, error)
 }
 
 // purchaseRepository 购买仓库实现
@@ -676,5 +677,28 @@ func (r *purchaseRepository) GetTotalRevenue(purchaseType entity.PurchaseType) (
 		return 0, err
 	}
 
+	return total0 + total1 + total2 + total3, nil
+}
+
+// GetTotalRevenueByDateRange 按日期范围统计收入（所有分片；created_at 在 [startDate 00:00, endDate 23:59]）
+func (r *purchaseRepository) GetTotalRevenueByDateRange(purchaseType entity.PurchaseType, startDate, endDate string) (float64, error) {
+	startTime := startDate + " 00:00:00"
+	endTime := endDate + " 23:59:59"
+	cond := "purchase_type = ? AND status = ? AND created_at >= ? AND created_at <= ?"
+	args := []interface{}{purchaseType, entity.PurchaseStatusCompleted, startTime, endTime}
+
+	var total0, total1, total2, total3 float64
+	if err := r.db.Model(&entity.PurchaseShard0{}).Where(cond, args...).Select("COALESCE(SUM(amount), 0)").Scan(&total0).Error; err != nil {
+		return 0, err
+	}
+	if err := r.db.Model(&entity.PurchaseShard1{}).Where(cond, args...).Select("COALESCE(SUM(amount), 0)").Scan(&total1).Error; err != nil {
+		return 0, err
+	}
+	if err := r.db.Model(&entity.PurchaseShard2{}).Where(cond, args...).Select("COALESCE(SUM(amount), 0)").Scan(&total2).Error; err != nil {
+		return 0, err
+	}
+	if err := r.db.Model(&entity.PurchaseShard3{}).Where(cond, args...).Select("COALESCE(SUM(amount), 0)").Scan(&total3).Error; err != nil {
+		return 0, err
+	}
 	return total0 + total1 + total2 + total3, nil
 }

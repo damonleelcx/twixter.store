@@ -13,7 +13,9 @@ import (
 	"mime/multipart"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/disintegration/imaging"
@@ -36,6 +38,8 @@ type ContentService interface {
 
 	// GetContent 获取内容
 	GetContent(contentID uint) (*entity.Content, error)
+	// GetContentTagNames 获取内容的标签名称列表
+	GetContentTagNames(contentID uint) ([]string, error)
 
 	// GetContentFiles 获取内容的所有文件
 	GetContentFiles(contentID uint) ([]*entity.ContentFile, error)
@@ -60,6 +64,10 @@ type ContentService interface {
 
 	// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买
 	ListFeed(category string, userID uint, limit, offset int) ([]ListFeedItem, error)
+	// ListFeedByTag 按标签名列出 feed 内容（仅 ready）
+	ListFeedByTag(tagName string, userID uint, limit, offset int) ([]ListFeedItem, error)
+	// ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部
+	ListFeedSearch(q string, category string, userID uint, limit, offset int) ([]ListFeedItem, error)
 
 	// GetGifPreview 返回 GIF 预览：已购买则流式返回原图；未购买则从 S3 取 GIF、模糊后返回 JPEG
 	GetGifPreview(fileID uint, userID uint) (body io.ReadCloser, contentType string, err error)
@@ -81,22 +89,26 @@ type ContentService interface {
 
 	// UserCanViewContent 用户是否可观看该内容（已购买或有效会员）
 	UserCanViewContent(userID uint, contentID uint) (bool, error)
+
+	// UpdateContent 更新内容元数据（需 can_edit_content 权限）
+	UpdateContent(contentID uint, name, description, category string, price float64, tagNames []string) error
 }
 
-// ListFeedItem feed 列表单项（含作者、时间戳，Twitter 风格）
+// ListFeedItem feed 列表单项（含作者、时间戳、标签，Twitter 风格）
 type ListFeedItem struct {
-	ID             uint    `json:"id"`
-	Name           string  `json:"name"`
-	Description    string  `json:"description"`
-	Category       string  `json:"category"`
-	Price          float64 `json:"price"`
-	PreviewGifURL  string  `json:"preview_gif_url"`
-	FirstFileID    uint    `json:"first_file_id"`
-	Purchased      bool    `json:"purchased"`
-	Bookmarked     bool    `json:"bookmarked,omitempty"`
-	CreatedAt      string  `json:"created_at"`
-	AuthorUsername string  `json:"author_username"`
-	AuthorAvatar   string  `json:"author_avatar,omitempty"`
+	ID             uint     `json:"id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Category       string   `json:"category"`
+	Price          float64  `json:"price"`
+	PreviewGifURL  string   `json:"preview_gif_url"`
+	FirstFileID    uint     `json:"first_file_id"`
+	Purchased      bool     `json:"purchased"`
+	Bookmarked     bool     `json:"bookmarked,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	AuthorUsername string   `json:"author_username"`
+	AuthorAvatar   string   `json:"author_avatar,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
 }
 
 // contentService 内容服务实现
@@ -342,6 +354,58 @@ func (s *contentService) GetContent(contentID uint) (*entity.Content, error) {
 	return s.contentRepo.GetByID(contentID)
 }
 
+// GetContentTagNames 获取内容的标签名称列表
+func (s *contentService) GetContentTagNames(contentID uint) ([]string, error) {
+	tags, err := s.contentTagRepo.GetTagsByContentID(contentID)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(tags))
+	for _, t := range tags {
+		names = append(names, t.Name)
+	}
+	return names, nil
+}
+
+// UpdateContent 更新内容元数据（name, description, category, price, tags）；tagNames 为 nil 时不改标签
+func (s *contentService) UpdateContent(contentID uint, name, description, category string, price float64, tagNames []string) error {
+	content, err := s.contentRepo.GetByID(contentID)
+	if err != nil {
+		return fmt.Errorf("content not found: %w", err)
+	}
+	content.Name = strings.TrimSpace(name)
+	content.Description = strings.TrimSpace(description)
+	if category == "dark" || category == "light" {
+		content.Category = entity.ContentCategory(category)
+	}
+	if price >= 0 {
+		content.Price = price
+	}
+	if err := s.contentRepo.Update(content); err != nil {
+		return fmt.Errorf("failed to update content: %w", err)
+	}
+	if tagNames != nil {
+		tagIDs := make([]uint, 0, len(tagNames))
+		for _, tagName := range tagNames {
+			tagName = strings.TrimSpace(tagName)
+			if tagName == "" {
+				continue
+			}
+			tagID, err := s.ensureTagExists(tagName)
+			if err != nil {
+				return fmt.Errorf("failed to process tag %q: %w", tagName, err)
+			}
+			if tagID > 0 {
+				tagIDs = append(tagIDs, tagID)
+			}
+		}
+		if err := s.contentTagRepo.ReplaceContentTags(contentID, tagIDs); err != nil {
+			return fmt.Errorf("failed to update content tags: %w", err)
+		}
+	}
+	return nil
+}
+
 // GetContentFiles 获取内容的所有文件
 func (s *contentService) GetContentFiles(contentID uint) ([]*entity.ContentFile, error) {
 	return s.fileRepo.GetByContentID(contentID)
@@ -476,17 +540,12 @@ func (s *contentService) GetContentAnalytics(contentID uint, startDate, endDate 
 	return result, nil
 }
 
-// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买
-func (s *contentService) ListFeed(category string, userID uint, limit, offset int) ([]ListFeedItem, error) {
-	contents, err := s.contentRepo.ListFeedByCategory(category, limit, offset)
-	if err != nil {
-		return nil, err
-	}
+// buildListFeedItems 将 contents 转为 ListFeedItem 列表（共用逻辑）
+func (s *contentService) buildListFeedItems(contents []entity.Content, userID uint) ([]ListFeedItem, error) {
 	out := make([]ListFeedItem, 0, len(contents))
 	for _, c := range contents {
 		authorUsername := ""
 		if c.UploadedBy > 0 && s.userRepo != nil {
-			// Prefer sharded tables (users_shard_0/1) where admin/twixter_user typically lives
 			if u, err := s.userRepo.GetByIDFromShard(c.UploadedBy, c.UploadedBy); err == nil && u != nil {
 				if u.Username != "" {
 					authorUsername = u.Username
@@ -494,7 +553,6 @@ func (s *contentService) ListFeed(category string, userID uint, limit, offset in
 					authorUsername = u.Email
 				}
 			}
-			// Fallback to default users table if not in shard
 			if authorUsername == "" {
 				if u, err := s.userRepo.GetByID(c.UploadedBy); err == nil && u != nil {
 					if u.Username != "" {
@@ -518,6 +576,7 @@ func (s *contentService) ListFeed(category string, userID uint, limit, offset in
 					bookmarked, _ = s.contentBookmarkRepo.Exists(userID, c.ID)
 				}
 			}
+			tagNames, _ := s.GetContentTagNames(c.ID)
 			out = append(out, ListFeedItem{
 				ID:             c.ID,
 				Name:           c.Name,
@@ -528,6 +587,7 @@ func (s *contentService) ListFeed(category string, userID uint, limit, offset in
 				AuthorUsername: authorUsername,
 				Purchased:      purchased,
 				Bookmarked:     bookmarked,
+				Tags:           tagNames,
 			})
 			continue
 		}
@@ -539,6 +599,7 @@ func (s *contentService) ListFeed(category string, userID uint, limit, offset in
 			purchased, _ = s.UserCanViewContent(userID, c.ID)
 			bookmarked, _ = s.contentBookmarkRepo.Exists(userID, c.ID)
 		}
+		tagNames, _ := s.GetContentTagNames(c.ID)
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -551,9 +612,44 @@ func (s *contentService) ListFeed(category string, userID uint, limit, offset in
 			Bookmarked:     bookmarked,
 			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
 			AuthorUsername: authorUsername,
+			Tags:           tagNames,
 		})
 	}
 	return out, nil
+}
+
+// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买
+func (s *contentService) ListFeed(category string, userID uint, limit, offset int) ([]ListFeedItem, error) {
+	contents, err := s.contentRepo.ListFeedByCategory(category, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildListFeedItems(contents, userID)
+}
+
+// ListFeedByTag 按标签名列出 feed 内容（仅 ready）
+func (s *contentService) ListFeedByTag(tagName string, userID uint, limit, offset int) ([]ListFeedItem, error) {
+	if tagName == "" {
+		return nil, nil
+	}
+	tag, err := s.tagRepo.GetByName(tagName)
+	if err != nil || tag == nil {
+		return []ListFeedItem{}, nil
+	}
+	contents, err := s.contentTagRepo.GetReadyContentsByTagID(tag.ID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildListFeedItems(contents, userID)
+}
+
+// ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部
+func (s *contentService) ListFeedSearch(q string, category string, userID uint, limit, offset int) ([]ListFeedItem, error) {
+	contents, err := s.contentRepo.SearchReady(q, category, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildListFeedItems(contents, userID)
 }
 
 // GetAuthorForUserID 根据上传者 ID 返回作者用户名和头像 URL
@@ -618,6 +714,7 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 		}
 		files, err := s.fileRepo.GetByContentID(c.ID)
 		if err != nil || len(files) == 0 {
+			tagNames, _ := s.GetContentTagNames(c.ID)
 			out = append(out, ListFeedItem{
 				ID:             c.ID,
 				Name:           c.Name,
@@ -628,11 +725,13 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 				AuthorUsername: authorUsername,
 				Purchased:      true,
 				Bookmarked:     true,
+				Tags:           tagNames,
 			})
 			continue
 		}
 		first := files[0]
 		bookmarked := true
+		tagNames, _ := s.GetContentTagNames(c.ID)
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -645,6 +744,7 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 			Bookmarked:     bookmarked,
 			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
 			AuthorUsername: authorUsername,
+			Tags:           tagNames,
 		})
 	}
 	return out, nil
@@ -716,6 +816,7 @@ func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) (
 		}
 		files, err := s.fileRepo.GetByContentID(c.ID)
 		if err != nil || len(files) == 0 {
+			tagNames, _ := s.GetContentTagNames(c.ID)
 			out = append(out, ListFeedItem{
 				ID:             c.ID,
 				Name:           c.Name,
@@ -725,11 +826,13 @@ func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) (
 				CreatedAt:      c.CreatedAt.Format(time.RFC3339),
 				AuthorUsername: authorUsername,
 				Bookmarked:     true,
+				Tags:           tagNames,
 			})
 			continue
 		}
 		first := files[0]
 		purchased, _ := s.UserCanViewContent(userID, c.ID)
+		tagNames, _ := s.GetContentTagNames(c.ID)
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -742,6 +845,7 @@ func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) (
 			Bookmarked:     true,
 			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
 			AuthorUsername: authorUsername,
+			Tags:           tagNames,
 		})
 	}
 	return out, nil
@@ -781,6 +885,8 @@ func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser,
 	return io.NopCloser(bytes.NewReader(blurred)), "image/gif", nil
 }
 
+const gifBlurRadius = 3 // 较小半径更快，仍能模糊；5 太慢
+
 // getGifBlurredGIF 从 S3 拉取 GIF，逐帧模糊后编码为完整多帧 GIF（保留延迟与循环）
 func (s *contentService) getGifBlurredGIF(gifS3Key string) ([]byte, error) {
 	reader, _, err := s.s3Service.StreamFile("", gifS3Key)
@@ -800,14 +906,35 @@ func (s *contentService) getGifBlurredGIF(gifS3Key string) ([]byte, error) {
 		return nil, fmt.Errorf("empty gif")
 	}
 
-	blurredFrames := make([]*image.Paletted, 0, len(img.Image))
-	for i := range img.Image {
-		frame := img.Image[i]
-		blurred := imaging.Blur(imaging.Clone(frame), 5)
-		dst := image.NewPaletted(blurred.Bounds(), frame.Palette)
-		draw.FloydSteinberg.Draw(dst, dst.Bounds(), blurred, image.Point{})
-		blurredFrames = append(blurredFrames, dst)
+	n := len(img.Image)
+	blurredFrames := make([]*image.Paletted, n)
+	workers := runtime.NumCPU()
+	if workers > n {
+		workers = n
 	}
+	if workers < 1 {
+		workers = 1
+	}
+	var wg sync.WaitGroup
+	ch := make(chan int, n)
+	for i := 0; i < n; i++ {
+		ch <- i
+	}
+	close(ch)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range ch {
+				frame := img.Image[i]
+				blurred := imaging.Blur(imaging.Clone(frame), gifBlurRadius)
+				dst := image.NewPaletted(blurred.Bounds(), frame.Palette)
+				draw.Draw(dst, dst.Bounds(), blurred, image.Point{}, draw.Src)
+				blurredFrames[i] = dst
+			}
+		}()
+	}
+	wg.Wait()
 
 	out := &gif.GIF{
 		Image:           blurredFrames,

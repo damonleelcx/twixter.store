@@ -163,9 +163,9 @@ func (cm *CacheMiddleware) InvalidateUserCache(userID uint) error {
 	return cm.InvalidateCache(pattern)
 }
 
-// InvalidateContentCache 使内容相关的缓存失效
+// InvalidateContentCache 使内容相关的缓存失效（GET /api/content/:id 的 key 含 path /api/content/<id>）
 func (cm *CacheMiddleware) InvalidateContentCache(contentID uint) error {
-	pattern := fmt.Sprintf("*:content:%d*", contentID)
+	pattern := fmt.Sprintf("*content/%d*", contentID)
 	return cm.InvalidateCache(pattern)
 }
 

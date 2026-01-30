@@ -41,6 +41,20 @@ type AnalyticsRepository interface {
 	GetTotalLikes(contentID uint, startDate, endDate string) (int64, error)
 	GetAverageWatchTime(contentID uint, startDate, endDate string) (float64, error)
 	GetTotalRevenue(contentID uint, startDate, endDate string) (float64, error)
+
+	// Admin 全站统计
+	GetAdminVideoStats(startDate, endDate string) (totalViews, totalPlayCount int64, totalWatchTime float64, err error)
+	GetAdminRevenueFromAnalytics(startDate, endDate string) (float64, error)
+	GetAdminTopVideoContents(limit int, startDate, endDate string) ([]AdminVideoContentStat, error)
+}
+
+// AdminVideoContentStat 管理员视频内容统计（按 content_id 聚合）
+type AdminVideoContentStat struct {
+	ContentID     uint    `json:"content_id"`
+	TotalViews    int64   `json:"total_views"`
+	TotalPlayCount int64  `json:"total_play_count"`
+	TotalWatchTime float64 `json:"total_watch_time"`
+	TotalRevenue  float64 `json:"total_revenue"`
 }
 
 // analyticsRepository 分析数据仓库实现
@@ -317,4 +331,65 @@ func (r *analyticsRepository) GetTotalRevenue(contentID uint, startDate, endDate
 		return 0, err
 	}
 	return total, nil
+}
+
+// GetAdminVideoStats 管理员：全站视频统计（日期范围内）
+func (r *analyticsRepository) GetAdminVideoStats(startDate, endDate string) (totalViews, totalPlayCount int64, totalWatchTime float64, err error) {
+	type agg struct {
+		Views     int64
+		PlayCount int64
+		WatchTime float64
+	}
+	var a agg
+	if err := r.db.Model(&entity.Analytics{}).
+		Where("date >= ? AND date <= ?", startDate, endDate).
+		Select("COALESCE(SUM(views), 0) AS views, COALESCE(SUM(play_count), 0) AS play_count, COALESCE(SUM(total_watch_time), 0) AS watch_time").
+		Scan(&a).Error; err != nil {
+		return 0, 0, 0, err
+	}
+	return a.Views, a.PlayCount, a.WatchTime, nil
+}
+
+// GetAdminRevenueFromAnalytics 管理员：从 analytics 表汇总内容收入（日期范围内）
+func (r *analyticsRepository) GetAdminRevenueFromAnalytics(startDate, endDate string) (float64, error) {
+	var total float64
+	if err := r.db.Model(&entity.Analytics{}).
+		Where("date >= ? AND date <= ?", startDate, endDate).
+		Select("COALESCE(SUM(revenue), 0)").
+		Scan(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// GetAdminTopVideoContents 管理员：按内容聚合的播放/观看/收入 Top N
+func (r *analyticsRepository) GetAdminTopVideoContents(limit int, startDate, endDate string) ([]AdminVideoContentStat, error) {
+	type row struct {
+		ContentID     uint
+		TotalViews    int64
+		TotalPlayCount int64
+		TotalWatchTime float64
+		TotalRevenue  float64
+	}
+	var rows []row
+	if err := r.db.Model(&entity.Analytics{}).
+		Where("date >= ? AND date <= ?", startDate, endDate).
+		Select("content_id AS content_id, COALESCE(SUM(views), 0) AS total_views, COALESCE(SUM(play_count), 0) AS total_play_count, COALESCE(SUM(total_watch_time), 0) AS total_watch_time, COALESCE(SUM(revenue), 0) AS total_revenue").
+		Group("content_id").
+		Order("total_views DESC").
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]AdminVideoContentStat, 0, len(rows))
+	for _, rw := range rows {
+		out = append(out, AdminVideoContentStat{
+			ContentID:      rw.ContentID,
+			TotalViews:     rw.TotalViews,
+			TotalPlayCount: rw.TotalPlayCount,
+			TotalWatchTime: rw.TotalWatchTime,
+			TotalRevenue:   rw.TotalRevenue,
+		})
+	}
+	return out, nil
 }

@@ -10,12 +10,18 @@ type HlsPlayerProps = {
   poster?: string;
   /** Optional "Play video" label for overlay (theme-aware). */
   playLabel?: string;
+  /** For vertical video: displayed aspect ratio = (width * factor) / height. Default 1/1.5 (taller). Use 1.5 in cards to shorten vertical videos. */
+  verticalAspectFactor?: number;
 };
 
-export function HlsPlayer({ fileId, className, poster, playLabel = "Play video" }: HlsPlayerProps) {
+const DEFAULT_VERTICAL_ASPECT_FACTOR = 1 / 1.5;
+
+export function HlsPlayer({ fileId, className, poster, playLabel = "Play video", verticalAspectFactor }: HlsPlayerProps) {
+  const factor = verticalAspectFactor ?? DEFAULT_VERTICAL_ASPECT_FACTOR;
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [showPlayOverlay, setShowPlayOverlay] = useState(true);
+  const [wrapperStyle, setWrapperStyle] = useState<React.CSSProperties>({});
 
   const streamUrl = `${getApiBase()}/content/files/${fileId}/stream`;
   const token = getAccessToken();
@@ -45,6 +51,25 @@ export function HlsPlayer({ fileId, className, poster, playLabel = "Play video" 
       video.removeEventListener("ended", onEnded);
     };
   }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onLoadedMetadata = () => {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (h > w && h > 0) {
+        setWrapperStyle({ aspectRatio: (w * factor) / h });
+      } else {
+        setWrapperStyle({});
+      }
+    };
+
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    if (video.videoWidth > 0) onLoadedMetadata();
+    return () => video.removeEventListener("loadedmetadata", onLoadedMetadata);
+  }, [factor]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -80,11 +105,13 @@ export function HlsPlayer({ fileId, className, poster, playLabel = "Play video" 
     }
   }, [streamUrl, token]);
 
+  const isVerticalBox = "aspectRatio" in wrapperStyle && wrapperStyle.aspectRatio != null;
+
   return (
-    <div className="relative inline-block w-fit max-w-full">
+    <div className="relative w-full" style={wrapperStyle}>
       <video
         ref={videoRef}
-        className={className}
+        className={isVerticalBox ? "block w-full h-full object-contain" : className}
         poster={poster}
         controls
         playsInline

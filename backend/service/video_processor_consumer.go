@@ -191,7 +191,7 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		Codec:      "libx264",
 		Bitrate:    "2000k",
 		Resolution: "1920x1080", // 转码到 1080p 分辨率
-		Quality:    "high",
+		Quality:    "medium",    // x264 preset（非 profile）：medium/fast/slow 等
 		Format:     "hls",
 	}
 

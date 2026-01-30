@@ -30,12 +30,14 @@ export function LeftSidebar({ locale }: LeftSidebarProps) {
   }, []);
 
   const canUpload = Boolean(user?.permissions?.includes("can_upload_content"));
+  const canViewAnalytics = Boolean(user?.permissions?.includes("can_view_analytics"));
   const isLoggedIn = user != null;
 
-  const items =
-    canUpload === true
-      ? navItems
-      : navItems.filter((item) => item.key !== "adminUpload");
+  const items = navItems.filter((item) => {
+    if (item.key === "adminUpload") return canUpload;
+    if (item.key === "adminAnalytics") return canViewAnalytics;
+    return true;
+  });
 
   return (
     <aside className="sticky top-0 hidden h-screen shrink-0 flex-col border-r border-[var(--border)] pl-4 pr-2 md:flex md:w-[68px] xl:w-[275px]">
@@ -63,15 +65,19 @@ export function LeftSidebar({ locale }: LeftSidebarProps) {
             href={
               item.key === "home"
                 ? `/${locale}`
-                : item.key === "adminUpload"
-                  ? `/${locale}/admin/upload`
-                  : item.key === "profile"
-                    ? `/${locale}/profile`
-                    : item.key === "bookmarks"
-                      ? `/${locale}/bookmarks`
-                      : item.key === "library"
-                        ? `/${locale}/library`
-                        : undefined
+                : item.key === "explore"
+                  ? `/${locale}/explore`
+                  : item.key === "adminUpload"
+                    ? `/${locale}/admin/upload`
+                    : item.key === "adminAnalytics"
+                      ? `/${locale}/admin/analytics`
+                      : item.key === "profile"
+                      ? `/${locale}/profile`
+                      : item.key === "bookmarks"
+                        ? `/${locale}/bookmarks`
+                        : item.key === "library"
+                          ? `/${locale}/library`
+                          : undefined
             }
           />
         ))}

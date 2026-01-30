@@ -9,6 +9,7 @@
     "profile": "Profile",
     "post": "Post",
     "adminUpload": "Admin Upload",
+    "adminAnalytics": "Analytics",
     "subscribe": "Subscribe"
   },
   "library": {
@@ -31,7 +32,10 @@
     "loading": "Loading...",
     "allCaughtUp": "You're all caught up",
     "unlockToView": "Purchase to unlock",
-    "credits": "credits"
+    "credits": "credits",
+    "search": "Search",
+    "searchPlaceholder": "Search content by name or description...",
+    "tagFeedHint": "Content with this tag"
   },
   "compose": {
     "media": "Media",
@@ -70,6 +74,13 @@
     "like": "Like",
     "share": "Share",
     "bookmark": "Bookmark",
+    "edit": "Edit",
+    "editTitle": "Edit content",
+    "editSave": "Save",
+    "editSaving": "Saving…",
+    "editSuccess": "Content updated.",
+    "editErrorNotFound": "Content not found.",
+    "editErrorNoPermission": "You don't have permission to edit content.",
     "showReplies": "Show replies",
     "unlockToView": "Purchase to unlock",
     "credits": "credits",
@@ -131,7 +142,11 @@
     "processing": "Processing…",
     "payNow": "Pay",
     "backToPlans": "Back to plans",
-    "orPayWithPayPal": "Or pay with other options"
+    "orPayWithPayPal": "Or pay with other options",
+    "shareableProfileLink": "Shareable profile link",
+    "shareableProfileHint": "Share this link so others can sign up with your referral code. You earn credits when they sign up.",
+    "copyLink": "Copy link",
+    "copied": "Copied!"
   },
   "purchaseReturn": {
     "verifyingTitle": "Verifying payment...",
@@ -145,9 +160,40 @@
   },
   "meta": {
     "title": "Twixter - Home",
-    "description": "A fresh take on social"
+    "description": "A fresh take on social",
+    "exploreTitle": "Explore | Twixter",
+    "exploreDescription": "Discover and search content on Twixter",
+    "tagTitle": "Posts tagged {tag} | Twixter",
+    "tagDescription": "Browse content with tag {tag} on Twixter"
   },
   "admin": {
+    "analytics": {
+      "title": "Analytics",
+      "subtitle": "View video and revenue analytics. Only users with analytics permission can access.",
+      "loading": "Loading...",
+      "back": "Back",
+      "videoAnalytics": "Video analytics",
+      "videoAnalyticsDesc": "Views, play count, watch time, top contents",
+      "revenueAnalytics": "Revenue analytics",
+      "revenueAnalyticsDesc": "Content revenue, credits revenue, total",
+      "startDate": "Start date",
+      "endDate": "End date",
+      "apply": "Apply",
+      "totalViews": "Total views",
+      "totalPlayCount": "Total plays",
+      "totalWatchTime": "Total watch time",
+      "topContents": "Top contents by views",
+      "content": "Content",
+      "views": "Views",
+      "plays": "Plays",
+      "watchTime": "Watch time",
+      "revenue": "Revenue",
+      "noData": "No data in this period",
+      "period": "Period",
+      "contentRevenue": "Content revenue (credits)",
+      "creditsRevenue": "Credits purchased (real money)",
+      "totalRevenue": "Total revenue"
+    },
     "upload": {
       "title": "Bulk Upload Videos",
       "back": "Back to Home",

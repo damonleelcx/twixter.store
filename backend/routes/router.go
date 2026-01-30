@@ -81,11 +81,15 @@ func SetupRouter(
 			setupContentRoutes(api, controllers.ContentController, services.AuthService, repos, cacheMiddleware)
 		}
 
-		tagsController := controller.NewTagsController(repos.TagRepo)
+		tagsController := controller.NewTagsController(repos.TagRepo, repos.UserPermissionRepo)
 		setupTagsRoutes(api, tagsController, services.AuthService, repos)
 
 		if controllers.PurchaseController != nil {
 			setupPurchaseRoutes(api, controllers.PurchaseController, services.AuthService, cacheMiddleware)
+		}
+
+		if controllers.AnalyticsController != nil {
+			setupAdminAnalyticsRoutes(api, controllers.AnalyticsController, services.AuthService, repos, cacheMiddleware)
 		}
 	}
 
@@ -153,9 +157,10 @@ func setupContentRoutes(
 	contentRoutes.GET("/files/:file_id/preview",
 		middleware.OptionalAuthMiddleware(authService),
 		contentController.StreamGifPreview)
-	// 字面路径 /library、/bookmarks 必须在 /:id 之前注册，否则 "library"/"bookmarks" 会被当作 id 匹配
+	// 字面路径 /library、/bookmarks、/viewing-token 必须在 /:id 之前注册
 	contentRoutes.GET("/library", middleware.AuthMiddleware(authService), contentController.ListLibrary)
 	contentRoutes.GET("/bookmarks", middleware.AuthMiddleware(authService), contentController.ListBookmarks)
+	contentRoutes.GET("/viewing-token", contentController.GetViewingToken)
 	// 内容详情与流：可选登录，未登录时凭 cookie viewing_dark 可访问 dark 内容
 	contentRoutes.GET("/:id",
 		middleware.OptionalAuthMiddleware(authService),
@@ -183,6 +188,10 @@ func setupContentRoutes(
 		contentAuthRoutes.POST("/videos/upload",
 			middleware.RequirePermission(repos.UserPermissionRepo, "can_upload_content"),
 			contentController.UploadVideos)
+		// 更新内容元数据（需 can_edit_content 权限，仅查 user_permissions）
+		contentAuthRoutes.PATCH("/:id",
+			middleware.RequirePermission(repos.UserPermissionRepo, "can_edit_content"),
+			contentController.UpdateContent)
 		// 书签：添加 / 移除
 		contentAuthRoutes.POST("/:id/bookmark", contentController.AddBookmark)
 		contentAuthRoutes.DELETE("/:id/bookmark", contentController.RemoveBookmark)
@@ -207,12 +216,47 @@ func setupTagsRoutes(
 ) {
 	tagsRoutes := api.Group("/tags")
 	tagsRoutes.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimiter))
-	tagsRoutes.Use(middleware.AuthMiddleware(authService))
+	// 热门标签（可选登录；category=all 需 can_view_nsfw，在 controller 内校验）
+	tagsRoutes.GET("/trending",
+		middleware.OptionalAuthMiddleware(authService),
+		tagsController.TrendTags)
+	tagsProtected := tagsRoutes.Group("")
+	tagsProtected.Use(middleware.AuthMiddleware(authService))
 	{
 		// 搜索标签（自动完成）- 需 can_search_tags；admin 和 dark 账户类型默认拥有
-		tagsRoutes.GET("/search",
+		tagsProtected.GET("/search",
 			middleware.RequirePermission(repos.UserPermissionRepo, "can_search_tags"),
 			tagsController.SearchTags)
+	}
+}
+
+// setupAdminAnalyticsRoutes 设置管理员分析路由（需 can_view_analytics）
+func setupAdminAnalyticsRoutes(
+	api *gin.RouterGroup,
+	analyticsController *controller.AnalyticsController,
+	authService service.AuthService,
+	repos *config.Repositories,
+	cacheMiddleware *middleware.CacheMiddleware,
+) {
+	adminAnalytics := api.Group("/admin/analytics")
+	adminAnalytics.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimiter))
+	adminAnalytics.Use(middleware.AuthMiddleware(authService))
+	adminAnalytics.Use(middleware.RequirePermission(repos.UserPermissionRepo, "can_view_analytics"))
+	{
+		adminAnalytics.GET("/video",
+			cacheMiddleware.Cache(middleware.CacheOptions{
+				TTL:         2 * time.Minute,
+				VaryByUser:  false,
+				VaryByQuery: true,
+			}),
+			analyticsController.GetAdminVideoAnalytics)
+		adminAnalytics.GET("/revenue",
+			cacheMiddleware.Cache(middleware.CacheOptions{
+				TTL:         2 * time.Minute,
+				VaryByUser:  false,
+				VaryByQuery: true,
+			}),
+			analyticsController.GetAdminRevenueAnalytics)
 	}
 }
 

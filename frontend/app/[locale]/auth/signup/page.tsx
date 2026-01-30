@@ -22,19 +22,23 @@ export default function SignUpPage() {
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
   const [referralCode, setReferralCode] = useState("");
-  const [viewing, setViewing] = useState<"viewing_light" | "viewing_dark">(
-    "viewing_light"
-  );
+  const [viewingToken, setViewingToken] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Resolve viewing from URL (shared link with ?viewing_dark) or direct visit; persist to cookie for registration.
+  // Resolve viewing token from URL or cookie (opaque; backend decrypts). Persist to cookie for registration.
   useEffect(() => {
     const fromUrl = getViewingFromSearchParams(searchParams);
     const fromCookie = getViewingCookie();
-    const value = fromUrl ?? fromCookie ?? "viewing_light";
-    setViewing(value);
-    setViewingCookie(value);
+    const token = fromUrl ?? fromCookie;
+    setViewingToken(token);
+    if (token) setViewingCookie(token);
+  }, [searchParams]);
+
+  // Prefill referral code from ?ref= (e.g. from parent's shareable profile link)
+  useEffect(() => {
+    const ref = searchParams.get("ref");
+    if (ref && typeof ref === "string") setReferralCode(ref.trim());
   }, [searchParams]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -46,13 +50,18 @@ export default function SignUpPage() {
     }
     setLoading(true);
     try {
-      const { session } = await authApiRegister({
+      const body: Parameters<typeof authApiRegister>[0] = {
         email,
         password,
         username: username.trim() || undefined,
         referral_code: referralCode.trim() || undefined,
-        viewing,
-      });
+      };
+      if (viewingToken) {
+        body.viewing_token = viewingToken;
+      } else {
+        body.viewing = "viewing_light";
+      }
+      const { session } = await authApiRegister(body);
       setAccessToken(session.access_token);
       if (session.refresh_token) setRefreshToken(session.refresh_token);
       router.push(`/${locale}`);

@@ -23,8 +23,8 @@ export function MobileBottomNav() {
           />
           <span className="text-[10px]">{t("home")}</span>
         </Link>
-        <a
-          href="#"
+        <Link
+          href={`/${locale}/explore`}
           className="flex flex-col items-center gap-1 py-2 px-4 text-[var(--muted)]"
         >
           <Icon
@@ -32,7 +32,7 @@ export function MobileBottomNav() {
             className="w-6 h-6"
           />
           <span className="text-[10px]">{t("explore")}</span>
-        </a>
+        </Link>
         <Link
           href={`/${locale}/bookmarks`}
           className="flex flex-col items-center gap-1 py-2 px-4 text-[var(--muted)]"

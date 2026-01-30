@@ -2,6 +2,7 @@
 
 import {
   addBookmark,
+  fetchCurrentUser,
   getAccessToken,
   getApiBase,
   isInsufficientCreditsError,
@@ -15,6 +16,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HlsPlayer } from "./HlsPlayer";
+import { VerticalAspectImage } from "./VerticalAspectImage";
 
 /** Format created_at to Twitter-style relative time (e.g. "2h", "3d", "Jan 29") */
 function formatTimestamp(iso: string): string {
@@ -49,10 +51,22 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
   const [purchasing, setPurchasing] = useState(false);
   const [bookmarked, setBookmarked] = useState(() => item.bookmarked ?? false);
   const [bookmarking, setBookmarking] = useState(false);
+  // Avoid hydration mismatch: server has no localStorage so getAccessToken() is null; only use token after mount
+  const [hasAuth, setHasAuth] = useState(false);
+  const [canEditContent, setCanEditContent] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
   const timeAgo = useMemo(() => formatTimestamp(item.created_at), [item.created_at]);
   const displayName = item.author_username || item.name;
   const avatarInitial = (displayName.charAt(0) || "?").toUpperCase();
+
+  useEffect(() => {
+    setHasAuth(getAccessToken() !== null);
+  }, []);
+  useEffect(() => {
+    fetchCurrentUser().then((user) => {
+      setCanEditContent((user?.permissions ?? []).includes("can_edit_content"));
+    });
+  }, []);
 
   const handlePurchase = useCallback(
     async (e: React.MouseEvent) => {
@@ -92,7 +106,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
         blobUrlRef.current = objectUrl;
         setBlurredPreviewUrl(objectUrl);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       cancelled = true;
       if (blobUrlRef.current) {
@@ -158,15 +172,45 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
                 {item.description}
               </p>
             )}
+            {/* 4) Tags (clickable → tag feed; use span + router to avoid <a> inside <a>) */}
+            {Array.isArray(item.tags) && item.tags.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
+                {item.tags.slice(0, 5).map((tag) => (
+                  <span
+                    key={tag}
+                    role="button"
+                    tabIndex={0}
+                    className="inline-flex cursor-pointer items-center rounded-full bg-[var(--muted)]/30 px-2 py-0.5 text-xs text-[var(--muted)] hover:bg-[var(--muted)]/50 hover:text-[var(--accent)]"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      router.push(`/${locale}/tag/${encodeURIComponent(tag)}`);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        router.push(`/${locale}/tag/${encodeURIComponent(tag)}`);
+                      }
+                    }}
+                  >
+                    #{tag}
+                  </span>
+                ))}
+                {item.tags.length > 5 && (
+                  <span className="text-xs text-[var(--muted)]">+{item.tags.length - 5}</span>
+                )}
+              </div>
+            )}
           </Link>
         </div>
         <button
           type="button"
-          disabled={!getAccessToken() || bookmarking}
+          disabled={!hasAuth || bookmarking}
           onClick={async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (!getAccessToken() || bookmarking) return;
+            if (!hasAuth || bookmarking) return;
             setBookmarking(true);
             try {
               if (bookmarked) {
@@ -197,17 +241,17 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
         </button>
         <button
           type="button"
-          onClick={(e) => {
+          onClick={async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const url = buildShareUrl(
+            const url = await buildShareUrl(
               typeof window !== "undefined" ? window.location.origin : "",
               locale,
               item.id,
               item.category === "dark" ? "dark" : "light"
             );
             if (typeof navigator !== "undefined" && navigator.share) {
-              navigator.share({ url, title: item.name }).catch(() => {});
+              navigator.share({ url, title: item.name }).catch(() => { });
             } else {
               void navigator.clipboard?.writeText(url);
             }
@@ -220,23 +264,24 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
           </svg>
         </button>
       </div>
-      <div className="px-4 pb-3 flex justify-center">
-        <div className="mt-2 relative rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20 w-fit max-w-full">
+      <div className="px-4 pb-3">
+        <div className="mt-2 relative w-full rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20 min-h-[200px]">
           {item.purchased && item.first_file_id ? (
             <HlsPlayer
               fileId={item.first_file_id}
-              className="block max-w-full max-h-[400px] w-auto h-auto object-contain"
+              className="block w-full h-auto object-contain"
               poster={previewSrc ?? undefined}
               playLabel={tPost("playVideo")}
+              verticalAspectFactor={1.5}
             />
           ) : previewSrc ? (
-            <img
+            <VerticalAspectImage
               src={previewSrc}
-              alt=""
-              className="block max-w-full max-h-[400px] w-auto h-auto object-contain"
+              className="block w-full h-auto object-contain"
+              factor={1.5}
             />
           ) : (
-            <div className="w-full min-h-[120px] flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center justify-center min-h-[200px]">
               <div className="w-14 h-14 rounded-full bg-[var(--foreground)]/80 flex items-center justify-center">
                 <svg
                   className="w-6 h-6 text-white ml-1"
@@ -248,17 +293,18 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
               </div>
             </div>
           )}
+
           {!item.purchased && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] text-left">
               <span className="text-white font-semibold text-base drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] [text-shadow:0_0_12px_rgba(0,0,0,0.9),0_1px_3px_rgba(0,0,0,1)]">
-                {getAccessToken() ? tFeed("unlockToView") : tPost("signUpToView")}
+                {hasAuth ? tFeed("unlockToView") : tPost("signUpToView")}
               </span>
-              {item.price > 0 && getAccessToken() && (
+              {item.price > 0 && hasAuth && (
                 <span className="text-white/95 text-sm mt-1.5 font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] [text-shadow:0_0_8px_rgba(0,0,0,0.8),0_1px_2px_rgba(0,0,0,1)]">
                   {item.price} {tFeed("credits")}
                 </span>
               )}
-              {getAccessToken() ? (
+              {hasAuth ? (
                 <button
                   type="button"
                   onClick={handlePurchase}
@@ -269,7 +315,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
                 </button>
               ) : (
                 <Link
-                  href={`/${locale}/auth/signup?viewing=${item.category === "dark" ? "viewing_dark" : "viewing_light"}`}
+                  href={`/${locale}/auth/signup`}
                   className="mt-4 rounded-lg bg-[var(--accent)] px-6 py-2 text-sm font-medium text-[var(--accent-foreground)] hover:opacity-90"
                 >
                   {tAuth("signUp")}
@@ -278,6 +324,22 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
             </div>
           )}
         </div>
+        {canEditContent && (
+          <div className="mt-2 w-full px-1 self-start">
+            <Link
+              href={`/${locale}/post/${item.id}/edit`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+              aria-label={tPost("edit")}
+            >
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              {tPost("edit")}
+            </Link>
+          </div>
+        )}
       </div>
     </article>
   );
