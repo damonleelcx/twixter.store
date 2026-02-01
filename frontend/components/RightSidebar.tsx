@@ -34,8 +34,11 @@ export function RightSidebar({ initialTrendingTags }: RightSidebarProps) {
     };
   }, []);
 
+  // When server didn't provide tags (null) or returned empty (e.g. server-side fetch failed in K8s), fetch on client
+  const shouldFetchTags =
+    initialTrendingTags == null || (Array.isArray(initialTrendingTags) && initialTrendingTags.length === 0);
   useEffect(() => {
-    if (initialTrendingTags != null) return;
+    if (!shouldFetchTags) return;
     let cancelled = false;
     const category = user === undefined ? "light" : (user?.permissions?.includes("can_view_nsfw") ? "all" : "light");
     fetchTrendingTags(category, 10).then((list) => {
@@ -44,12 +47,13 @@ export function RightSidebar({ initialTrendingTags }: RightSidebarProps) {
     return () => {
       cancelled = true;
     };
-  }, [initialTrendingTags, user]);
+  }, [shouldFetchTags, user]);
 
   const walletBalance = user != null && typeof user.wallet_balance === "number" ? user.wallet_balance : null;
   const hasActiveMembership = user != null && user.membership_status === "active";
 
-  const trendingTags = initialTrendingTags ?? clientTrending;
+  const trendingTags =
+    initialTrendingTags != null && initialTrendingTags.length > 0 ? initialTrendingTags : clientTrending;
 
   return (
     <aside className="sticky top-0 hidden h-screen w-[350px] shrink-0 overflow-y-auto p-4 xl:block">
@@ -113,6 +117,20 @@ export function RightSidebar({ initialTrendingTags }: RightSidebarProps) {
           ))}
         </div>
       </div>
+      <footer className="mt-6 flex flex-wrap gap-x-3 border-t border-[var(--border)] pt-4">
+        <Link
+          href={`/${locale}/terms`}
+          className="text-xs text-[var(--muted)] hover:text-[var(--accent)] hover:underline"
+        >
+          {tSidebar("termsOfUse")}
+        </Link>
+        <Link
+          href={`/${locale}/privacy`}
+          className="text-xs text-[var(--muted)] hover:text-[var(--accent)] hover:underline"
+        >
+          {tSidebar("privacyPolicy")}
+        </Link>
+      </footer>
     </aside>
   );
 }

@@ -70,8 +70,8 @@ func NewPurchaseService(
 // CreateMembershipCheckout 创建会员购买结账会话
 func (s *purchaseService) CreateMembershipCheckout(userID uint, months int) (*stripe.CheckoutSession, error) {
 	// 验证月份数
-	if months != 1 && months != 3 && months != 9 {
-		return nil, fmt.Errorf("invalid months: must be 1, 3, or 9")
+	if months != 1 && months != 3 && months != 6 {
+		return nil, fmt.Errorf("invalid months: must be 1, 3, or 6")
 	}
 
 	// 创建 Stripe Checkout Session
@@ -80,15 +80,15 @@ func (s *purchaseService) CreateMembershipCheckout(userID uint, months int) (*st
 		return nil, fmt.Errorf("failed to create checkout session: %w", err)
 	}
 
-	// 价格与前端 subscribe 页一致：1 月 6.99，3 月 16.99，9 月 56.99
+	// 价格与前端 subscribe 页一致：1 月 6.99，3 月 16.99，6 月 36.99
 	var totalAmount float64
 	switch months {
 	case 1:
 		totalAmount = 6.99
 	case 3:
 		totalAmount = 16.99
-	case 9:
-		totalAmount = 56.99
+	case 6:
+		totalAmount = 36.99
 	default:
 		totalAmount = 6.99 * float64(months)
 	}
@@ -128,8 +128,8 @@ func membershipAmountAndDesc(months int) (amountUSD string, totalAmount float64,
 		totalAmount = 6.99
 	case 3:
 		totalAmount = 16.99
-	case 9:
-		totalAmount = 56.99
+	case 6:
+		totalAmount = 36.99
 	default:
 		totalAmount = 6.99 * float64(months)
 	}
@@ -138,8 +138,8 @@ func membershipAmountAndDesc(months int) (amountUSD string, totalAmount float64,
 
 // CreateMembershipCheckoutPayPal 创建会员购买 PayPal 订单
 func (s *purchaseService) CreateMembershipCheckoutPayPal(userID uint, months int) (orderID string, err error) {
-	if months != 1 && months != 3 && months != 9 {
-		return "", fmt.Errorf("invalid months: must be 1, 3, or 9")
+	if months != 1 && months != 3 && months != 6 {
+		return "", fmt.Errorf("invalid months: must be 1, 3, or 6")
 	}
 	if s.paypalService == nil {
 		return "", fmt.Errorf("PayPal is not configured")

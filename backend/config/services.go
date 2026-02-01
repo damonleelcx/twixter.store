@@ -78,35 +78,39 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 		permissionRepo,
 	)
 
-	// 初始化 S3 服务（可选）
-	s3Service, err := service.NewS3Service()
+	// 初始化 S3 服务（可选）；失败时用占位实现，内容只读路由仍可用
+	var s3Service service.S3Service
+	s3Real, err := service.NewS3Service()
 	if err != nil {
-		log.Printf("Warning: Failed to initialize S3 service: %v. Video upload will not work.", err)
-		s3Service = nil
+		log.Printf("Warning: Failed to initialize S3 service: %v. Video upload/stream will not work.", err)
+		s3Service = service.NoopS3Service()
+	} else {
+		s3Service = s3Real
 	}
 
-	// 初始化 Kafka 服务（可选）
-	kafkaService, err := service.NewKafkaService()
+	// 初始化 Kafka 服务（可选）；失败时用占位实现
+	var kafkaService service.KafkaService
+	kafkaReal, err := service.NewKafkaService()
 	if err != nil {
 		log.Printf("Warning: Failed to initialize Kafka service: %v. Video processing will not work.", err)
-		kafkaService = nil
+		kafkaService = service.NoopKafkaService()
+	} else {
+		kafkaService = kafkaReal
 	}
 
-	// 初始化内容服务（如果 S3 和 Kafka 可用）
-	if s3Service != nil && kafkaService != nil {
-		services.ContentService = service.NewContentService(
-			repos.ContentRepo,
-			repos.ContentFileRepo,
-			repos.TagRepo,
-			repos.ContentTagRepo,
-			repos.ContentBookmarkRepo,
-			repos.AnalyticsRepo,
-			repos.PurchaseRepo,
-			repos.UserRepo,
-			s3Service,
-			kafkaService,
-		)
-	}
+	// 初始化内容服务（始终创建；S3/Kafka 不可用时上传与流式传输会返回 503）
+	services.ContentService = service.NewContentService(
+		repos.ContentRepo,
+		repos.ContentFileRepo,
+		repos.TagRepo,
+		repos.ContentTagRepo,
+		repos.ContentBookmarkRepo,
+		repos.AnalyticsRepo,
+		repos.PurchaseRepo,
+		repos.UserRepo,
+		s3Service,
+		kafkaService,
+	)
 
 	// 初始化 Stripe 服务（可选）
 	stripeService, err := service.NewStripeService()
@@ -138,8 +142,8 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 		)
 	}
 
-	// 启动 Kafka 消费者（如果服务可用）
-	if kafkaService != nil && s3Service != nil {
+	// 启动 Kafka 消费者（仅当真实 S3 和 Kafka 均可用时）
+	if s3Real != nil && kafkaReal != nil {
 		videoProcessingService, err := service.NewVideoProcessingService()
 		if err != nil {
 			log.Printf("Warning: Failed to initialize video processing service: %v. Video processing will not work.", err)

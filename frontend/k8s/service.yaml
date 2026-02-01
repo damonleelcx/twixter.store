@@ -1,0 +1,17 @@
+# Frontend ClusterIP Service，供 Ingress 与集群内访问
+apiVersion: v1
+kind: Service
+metadata:
+  name: twixter-frontend
+  namespace: default
+  labels:
+    app: twixter-frontend
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http
+  selector:
+    app: twixter-frontend

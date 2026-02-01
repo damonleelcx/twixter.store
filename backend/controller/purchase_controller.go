@@ -35,7 +35,7 @@ func NewPurchaseController(
 
 // CreateMembershipCheckoutRequest 创建会员购买结账请求
 type CreateMembershipCheckoutRequest struct {
-	Months int `json:"months" binding:"required,oneof=1 3 9"` // 1, 3, 或 9 个月
+	Months int `json:"months" binding:"required,oneof=1 3 6"` // 1, 3, 或 6 个月
 }
 
 // CreateMembershipCheckout 创建会员购买结账会话
@@ -75,7 +75,7 @@ func (pc *PurchaseController) CreateMembershipCheckout(c *gin.Context) {
 	// 验证月份数
 	if req.Months != 1 && req.Months != 3 && req.Months != 9 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "months must be 1, 3, or 9",
+			"error": "months must be 1, 3, or 6",
 		})
 		return
 	}
@@ -106,7 +106,7 @@ func (pc *PurchaseController) CreateMembershipCheckout(c *gin.Context) {
 // @Security BearerAuth
 // @Accept json
 // @Produce json
-// @Param request body CreateMembershipCheckoutRequest true "Months: 1, 3, or 9"
+// @Param request body CreateMembershipCheckoutRequest true "Months: 1, 3, or 6"
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} map[string]interface{}
 // @Failure 503 {object} map[string]interface{}
@@ -125,7 +125,7 @@ func (pc *PurchaseController) CreatePayPalMembershipOrder(c *gin.Context) {
 		return
 	}
 	if req.Months != 1 && req.Months != 3 && req.Months != 9 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "months must be 1, 3, or 9"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "months must be 1, 3, or 6"})
 		return
 	}
 

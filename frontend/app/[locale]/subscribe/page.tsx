@@ -23,10 +23,10 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const MONTHLY_PRICE = 6.99;
-const MEMBERSHIP_PLANS: { months: 1 | 3 | 9; price: number; labelKey: string }[] = [
+const MEMBERSHIP_PLANS: { months: 1 | 3 | 6; price: number; labelKey: string }[] = [
   { months: 1, price: MONTHLY_PRICE * 1, labelKey: "plan1Month" },
   { months: 3, price: 16.99, labelKey: "plan3Months" },
-  { months: 9, price: 56.99, labelKey: "plan9Months" },
+  { months: 6, price: 36.99, labelKey: "plan6Months" },
 ];
 
 const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
@@ -40,7 +40,7 @@ function MembershipCheckoutForm({
 }: {
   locale: string;
   userEmail: string | null;
-  selectedMonths: 1 | 3 | 9;
+  selectedMonths: 1 | 3 | 6;
 }) {
   const router = useRouter();
   const t = useTranslations("auth");
@@ -156,7 +156,7 @@ export default function SubscribePage() {
   const tSidebar = useTranslations("sidebar");
   const [user, setUser] = useState<CurrentUser | null | undefined>(undefined);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
-  const [selectedMonths, setSelectedMonths] = useState<1 | 3 | 9 | null>(null);
+  const [selectedMonths, setSelectedMonths] = useState<1 | 3 | 6 | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -170,7 +170,13 @@ export default function SubscribePage() {
     };
   }, []);
 
-  async function handleSelectPlan(months: 1 | 3 | 9) {
+  useEffect(() => {
+    if (user === null) {
+      router.replace(`/${locale}/auth/signin`);
+    }
+  }, [user, locale, router]);
+
+  async function handleSelectPlan(months: 1 | 3 | 6) {
     if (!stripePublishableKey) {
       setError("Stripe is not configured. Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.");
       return;
@@ -210,7 +216,6 @@ export default function SubscribePage() {
   }
 
   if (user === null) {
-    router.replace(`/${locale}/auth/signin`);
     return null;
   }
 

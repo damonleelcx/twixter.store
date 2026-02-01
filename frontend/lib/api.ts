@@ -265,8 +265,8 @@ export async function createCreditsCheckout(amount: number, credits: number): Pr
   return data;
 }
 
-/** Create membership checkout session. months: 1, 3, or 9. Returns clientSecret for Stripe embedded checkout. */
-export async function createMembershipCheckout(months: 1 | 3 | 9): Promise<{
+/** Create membership checkout session. months: 1, 3, or 6. Returns clientSecret for Stripe embedded checkout. */
+export async function createMembershipCheckout(months: 1 | 3 | 6): Promise<{
   clientSecret: string;
   url?: string;
   checkout_session_id?: string;
@@ -281,8 +281,8 @@ export async function createMembershipCheckout(months: 1 | 3 | 9): Promise<{
   return data;
 }
 
-/** Create PayPal order for membership (backup payment). months: 1, 3, or 9. Returns PayPal order id. */
-export async function createPayPalMembershipOrder(months: 1 | 3 | 9): Promise<{ id: string }> {
+/** Create PayPal order for membership (backup payment). months: 1, 3, or 6. Returns PayPal order id. */
+export async function createPayPalMembershipOrder(months: 1 | 3 | 6): Promise<{ id: string }> {
   const base = getApiBase();
   const res = await fetchWithAuth(`${base}/purchase/membership/paypal/order`, {
     method: "POST",
@@ -706,6 +706,11 @@ export async function fetchLibraryContent(
 }
 
 /** Server-only: base URL for API (absolute). Use in server components / server actions. */
+/**
+ * Server-only API base for fetch from Node (SSR). In K8s, set BACKEND_URL (e.g. http://twixter-backend:8080)
+ * so the frontend pod can reach the backend; NEXT_PUBLIC_API_URL (e.g. api.twixter.local) is for the browser
+ * and may not resolve inside the cluster.
+ */
 export function getServerApiBase(): string {
   if (typeof window !== "undefined") return "";
   const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";

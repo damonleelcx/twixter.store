@@ -31,8 +31,11 @@ func SetupRouter(
 	router := gin.Default()
 	router.MaxMultipartMemory = maxMultipartMemory
 
-	// CORS：当前端通过 NEXT_PUBLIC_API_URL 直连后端时（如 localhost:3000 → localhost:8080）需允许跨域
-	origins := []string{"http://localhost:3000", "http://127.0.0.1:3000"}
+	// CORS：前端直连后端时需允许跨域（localhost 本地开发；www.twixter.local 为 K8s/Ingress 前端域名）
+	origins := []string{
+		"http://localhost:3000", "http://127.0.0.1:3000",
+		"http://www.twixter.local", "https://www.twixter.local",
+	}
 	if v := os.Getenv("CORS_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {

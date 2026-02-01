@@ -141,6 +141,22 @@ export function SignUpContent() {
           {t("signIn")}
         </Link>
       </p>
+      <p className="mt-4 text-center text-xs text-[var(--muted)]">
+        {t("agreeToTerms")}{" "}
+        <Link
+          href={`/${locale}/terms`}
+          className="font-medium text-[var(--accent)] hover:underline"
+        >
+          {t("termsOfUse")}
+        </Link>
+        {" "}{t("andPrivacyPolicy")}{" "}
+        <Link
+          href={`/${locale}/privacy`}
+          className="font-medium text-[var(--accent)] hover:underline"
+        >
+          {t("privacyPolicy")}
+        </Link>
+      </p>
     </>
   );
 }

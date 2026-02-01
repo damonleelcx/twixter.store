@@ -23,12 +23,12 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const CREDIT_PACKAGES = [
-  { credits: 20, amount: 0.69 },
-  { credits: 100, amount: 3.69 },
-  { credits: 300, amount: 13.69 },
-  { credits: 500, amount: 23.69 },
-  { credits: 700, amount: 33.69 },
-  { credits: 900, amount: 43.69 },
+  { credits: 69, amount: 0.69 },
+  { credits: 169, amount: 3.69 },
+  { credits: 369, amount: 13.69 },
+  { credits: 569, amount: 23.69 },
+  { credits: 769, amount: 33.69 },
+  { credits: 969, amount: 43.69 },
 ];
 
 const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
