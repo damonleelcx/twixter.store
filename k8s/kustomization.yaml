@@ -1,0 +1,8 @@
+# 在仓库根目录一次性部署前后端：kubectl apply -k k8s/
+# 前置：backend/.env（后端 Secret）、minikube addons enable ingress
+# hosts：api.twixter.local -> backend，www.twixter.local -> frontend
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../backend/k8s
+  - ../frontend/k8s

@@ -1,0 +1,31 @@
+# Ingress 暴露前端，与 backend 共用 nginx ingress
+# 本地：将 www.twixter.local 解析到 minikube IP
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: twixter-frontend-ingress
+  namespace: default
+  labels:
+    app: twixter-frontend
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100mb"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: www.twixter.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: twixter-frontend
+                port:
+                  number: 3000
+  # 若需 TLS，取消注释并创建 tls secret
+  # tls:
+  #   - hosts:
+  #       - www.twixter.local
+  #     secretName: twixter-frontend-tls

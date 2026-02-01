@@ -1,0 +1,56 @@
+# Frontend (Next.js standalone) 部署
+# 镜像需在构建时传入 NEXT_PUBLIC_* 等 build args；运行时通过 ConfigMap/Secret 注入 BACKEND_URL 等
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: twixter-frontend
+  namespace: default
+  labels:
+    app: twixter-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: twixter-frontend
+  template:
+    metadata:
+      labels:
+        app: twixter-frontend
+    spec:
+      containers:
+        - name: frontend
+          # Docker Hub: damonleelcx/twixter.store-frontend:latest ；构建时需传入 NEXT_PUBLIC_* 等 ARG
+          image: damonleelcx/twixter.store-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: twixter-frontend-config
+            - secretRef:
+                name: twixter-frontend-secret
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      restartPolicy: Always

@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: twixter-backend
+    ports:
+      - "8080:8080"
+    environment:
+      # 本机 Postgres：容器内 localhost 指容器自身，需用 host.docker.internal 访问宿主机
+      # 改用托管 Postgres 时删下面一行，由 .env 的 DB_HOST 提供
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_SSLMODE=${DB_SSLMODE:-require}
+      # Redis configuration
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      # Sentry configuration
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      # AWS S3 configuration (for video upload)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET}
+      # Kafka：容器内必须用服务名 kafka:9092，不能使用 localhost
+      - KAFKA_BROKERS=kafka:9092
+      # Stripe payment configuration
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      # PayPal (backup payment): optional
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID:-}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET:-}
+      - PAYPAL_MODE=${PAYPAL_MODE:-sandbox}
+      # Frontend URL (for Stripe Checkout return URLs)
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      # 容器内使用镜像内 FFmpeg，不读 .env 的 Windows 路径
+      - FFMPEG_PATH=
+      - FFPROBE_PATH=
+      # Temporary directory for video processing
+      - TEMP_DIR=${TEMP_DIR:-/tmp/video-processing}
+      # Seed admin (if no admin exists): set in .env and loaded via env_file
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+    env_file:
+      - .env
+    volumes:
+      # 挂载 .env 供应用内 godotenv.Load() 读取，避免 "Warning: .env file not found"
+      - ./.env:/root/.env:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - twixter-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: twixter-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - twixter-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: twixter-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - twixter-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: twixter-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # Zookeeper 模式（非 KRaft）
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - twixter-network
+
+networks:
+  twixter-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:

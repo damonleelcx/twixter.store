@@ -1,0 +1,16 @@
+# 前端运行时配置（非敏感）
+# NEXT_PUBLIC_* 在镜像构建时通过 ARG 打入；此处配置集群内后端地址等
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: twixter-frontend-config
+  namespace: default
+  labels:
+    app: twixter-frontend
+data:
+  # 集群内访问后端（同 namespace 可省略 .default.svc.cluster.local）
+  BACKEND_URL: "http://twixter-backend:8080"
+  NODE_ENV: "production"
+  PORT: "3000"
+  # 使 Next.js 监听所有接口，否则 port-forward / Ingress 连 127.0.0.1:3000 会 Connection refused
+  HOSTNAME: "0.0.0.0"

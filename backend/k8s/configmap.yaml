@@ -1,0 +1,13 @@
+# 非敏感运行配置，与 Secret 配合使用
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: twixter-backend-config
+  namespace: default
+  labels:
+    app: twixter-backend
+data:
+  TEMP_DIR: "/tmp/video-processing"
+  # FFmpeg 在镜像内，留空由应用使用 PATH
+  FFMPEG_PATH: ""
+  FFPROBE_PATH: ""

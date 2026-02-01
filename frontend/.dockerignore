@@ -1,0 +1,45 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build output (we build inside Docker)
+.next
+out
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+*.md
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Env files: do not bake into image; use --env-file .env or mount at runtime
+.env
+.env.local
+.env.*.local
+.env.example
+
+# Debug / test
+coverage
+.nyc_output
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+README.md
+*.md
