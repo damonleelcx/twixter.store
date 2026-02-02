@@ -19,6 +19,14 @@ spec:
     - host: www.twixter.store
       http:
         paths:
+          # /api 直接到后端，避免 Next.js 构建时 rewrites 写死导致 504
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: twixter-backend
+                port:
+                  number: 8080
           - path: /
             pathType: Prefix
             backend:

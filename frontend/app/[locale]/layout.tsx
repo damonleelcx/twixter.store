@@ -73,9 +73,10 @@ export default async function LocaleLayout({ children, params }: Props) {
             })(window, document, "clarity", "script", "vadzxgbtzn");
           `}
         </Script>
-        <Script
+        {/* AdSense: 使用普通 script 避免 Next.js Script 注入的 data-nscript，否则会报错 */}
+        <script
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9330067151515952"
-          strategy="afterInteractive"
+          async
           crossOrigin="anonymous"
         />
         <NextIntlClientProvider messages={messages} locale={locale}>
