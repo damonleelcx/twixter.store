@@ -8,7 +8,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: YOUR_EMAIL@example.com
+    email: twixter.store@gmail.com
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:

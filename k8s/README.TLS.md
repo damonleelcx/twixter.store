@@ -9,28 +9,28 @@
 
 ## 1. 安装 cert-manager（若未安装）
 
-k3s 默认不带 cert-manager，需要单独安装，例如：
+k3s 默认不带 cert-manager，需要单独安装。**无需 Helm**，用 `kubectl` 即可：
 
 ```bash
-# 添加 Helm 仓库并安装 cert-manager
+# 官方 manifest（含 CRD），见 https://cert-manager.io/docs/installation/kubectl/
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+```
+
+确认 Pod 就绪（通常会有 cert-manager、cainjector、webhook 三个）：
+
+```bash
+kubectl get pods -n cert-manager
+```
+
+若已安装 Helm，也可用 Helm 安装（可选）：
+
+```bash
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 kubectl create namespace cert-manager
 helm install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
   --set installCRDs=true
-```
-
-或使用官方 manifest（见 [cert-manager 文档](https://cert-manager.io/docs/installation/)）：
-
-```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
-```
-
-确认 Pod 就绪：
-
-```bash
-kubectl get pods -n cert-manager
 ```
 
 ## 2. 创建 ClusterIssuer（Let’s Encrypt）
