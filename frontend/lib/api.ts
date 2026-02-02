@@ -7,6 +7,8 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 /** Prefer relative /api so Next.js rewrites proxy to backend; set NEXT_PUBLIC_API_URL for direct backend URL (e.g. production). No trailing slash. */
 export function getApiBase(): string {
   if (typeof window !== "undefined") {
+    // On HTTPS pages always use relative /api to avoid mixed content (browser warning)
+    if (window.location.protocol === "https:") return "/api";
     const raw = process.env.NEXT_PUBLIC_API_URL || "";
     const base = raw.replace(/\/+$/, "");
     return base ? `${base}/api` : "/api";
