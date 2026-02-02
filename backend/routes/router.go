@@ -35,6 +35,7 @@ func SetupRouter(
 	origins := []string{
 		"http://localhost:3000", "http://127.0.0.1:3000",
 		"http://www.twixter.local", "https://www.twixter.local",
+		"http://www.twixter.store", "https://www.twixter.store",
 	}
 	if v := os.Getenv("CORS_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {

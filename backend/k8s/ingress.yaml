@@ -16,7 +16,7 @@ spec:
   ingressClassName: nginx
   rules:
     # 本地访问：将 api.twixter.local 解析到 minikube IP（或加 hosts 条目）
-    - host: api.twixter.local
+    - host: api.twixter.store
       http:
         paths:
           - path: /
@@ -26,8 +26,8 @@ spec:
                 name: twixter-backend
                 port:
                   number: 8080
-  # 若需 TLS，取消注释并创建 tls secret
-  # tls:
-  #   - hosts:
-  #       - api.twixter.local
-  #     secretName: twixter-backend-tls
+  # 若需 TLS，取消注释并创建 tls secret（或使用 cert-manager 自动签发）
+  tls:
+    - hosts:
+        - api.twixter.store
+      secretName: twixter-backend-tls

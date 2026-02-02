@@ -457,7 +457,7 @@ kubectl port-forward svc/twixter-frontend 3000:3000
 
 ### 前置条件
 
-- 一台有**公网 IP** 的 Linux 服务器（如 Ubuntu 22.04 / Debian 12，推荐至少 2 CPU、4GB 内存）
+- 一台有**公网 IP** 的 Linux 服务器（如 Ubuntu 22.04 / Debian 12 / **Rocky Linux 8**，推荐至少 2 CPU、4GB 内存）
 - 已购买并拥有域名 **twixter.store**，且能在域名服务商处添加 DNS 记录
 - 本机已安装 `kubectl`（用于从本机或 CI 执行 `kubectl apply`；若只在服务器上操作，在服务器上安装即可）
 
@@ -469,19 +469,19 @@ kubectl port-forward svc/twixter-frontend 3000:3000
    # 或 ssh your_user@<SERVER_IP>
    ```
 
-2. **更新系统并安装基础工具**（以 Ubuntu/Debian 为例）：
+2. **更新系统并安装基础工具**（以 Rocky Linux 8 为例）：
    ```bash
-   sudo apt update && sudo apt upgrade -y
-   sudo apt install -y curl git
+   sudo dnf update -y
+   sudo dnf install -y curl git
    ```
 
-3. **开放防火墙端口**（若使用 ufw）：
+3. **开放防火墙端口**（Rocky Linux 8 使用 firewalld）：
    ```bash
-   sudo ufw allow 22/tcp    # SSH
-   sudo ufw allow 80/tcp    # HTTP（用于 Let's Encrypt 校验及重定向）
-   sudo ufw allow 443/tcp   # HTTPS
-   sudo ufw enable
-   sudo ufw status
+   sudo firewall-cmd --permanent --add-service=ssh      # 22/tcp
+   sudo firewall-cmd --permanent --add-service=http      # 80/tcp（Let's Encrypt 校验及重定向）
+   sudo firewall-cmd --permanent --add-service=https     # 443/tcp
+   sudo firewall-cmd --reload
+   sudo firewall-cmd --list-all
    ```
 
 ### 步骤 2：配置 DNS（twixter.store）
@@ -500,33 +500,126 @@ kubectl port-forward svc/twixter-frontend 3000:3000
 
 任选其一即可。
 
-**方案 A：k3s（单节点推荐，轻量）**
+**方案 A：k3s（单节点推荐，轻量；Rocky Linux 8 推荐）**
 
 ```bash
+# Rocky Linux 8 / 通用：安装 k3s
 curl -sfL https://get.k3s.io | sh -
-sudo systemctl enable kubelet
+sudo systemctl enable k3s
+sudo systemctl start k3s
+# Rocky 8 若启用 firewalld，放行 k3s API 与节点通信
+sudo firewall-cmd --permanent --add-port=6443/tcp --add-port=10250/tcp
+sudo firewall-cmd --reload
 # 本机使用 kubectl
+mkdir -p ~/.kube
 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
 sudo chown $(id -u):$(id -g) ~/.kube/config
+export KUBECONFIG=~/.kube/config
+# 可选：每次登录生效，echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc
+kubectl get nodes
 ```
 
 k3s 自带 Traefik；若希望与现有文档一致使用 **nginx Ingress**，可安装 nginx-ingress 并禁用 Traefik：
 
 ```bash
-# 若已安装 k3s 且要改用 nginx ingress，先禁用 traefik
-sudo kubectl get deploy -n kube-system -o name | grep traefik | xargs sudo kubectl delete -n kube-system
+# 若已安装 k3s 且要改用 nginx ingress，先禁用 traefik（无 traefik 时 xargs -r 不执行，不报错）
+kubectl get deploy -n kube-system -o name | grep traefik | xargs -r kubectl delete -n kube-system
 # 安装 nginx ingress
-sudo kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.2/deploy/static/provider/baremetal/deploy.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.2/deploy/static/provider/baremetal/deploy.yaml
 # 若 LoadBalancer 一直 Pending，改为 NodePort 或 HostNetwork，或见方案 B
 ```
 
 **方案 B：Minikube（driver=none，直接跑在宿主机）**
 
+- **Rocky Linux 8 建议用方案 A（k3s）**：minikube 的 `--extra-config` 不支持 `kubeadm.ignorePreflightErrors`，在 Rocky 8（内核 4.18、cgroups v1）上 kubeadm 会报 SystemVerification，无法通过参数跳过。k3s 不用 kubeadm，无此限制。
+- **Ubuntu/Debian**：可用 `curl -fsSL https://get.docker.com | sh` 安装 Docker。
+- **Rocky Linux 8 / RHEL/CentOS 系**（若仍选 Minikube）：`get.docker.com` 不支持，请用 dnf + Docker 官方源安装：
+
 ```bash
-# 安装 Docker 与 Minikube
+# Rocky Linux 8：安装 Docker（get.docker.com 不支持 rocky，用 dnf）
+sudo dnf install -y dnf-plugins-core
+sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+# driver=none 时 Kubernetes 需要 conntrack、crictl、containernetworking-plugins（在 root 的 PATH / /opt/cni/bin）
+sudo dnf install -y conntrack-tools
+# CNI 插件（minikube none driver 必需），装到 /opt/cni/bin
+CNI_VER=v1.4.0
+sudo mkdir -p /opt/cni/bin
+curl -sSL "https://github.com/containernetworking/plugins/releases/download/${CNI_VER}/cni-plugins-linux-amd64-${CNI_VER}.tgz" -o /tmp/cni-plugins.tgz
+sudo tar zxvf /tmp/cni-plugins.tgz -C /opt/cni/bin
+rm -f /tmp/cni-plugins.tgz
+# Rocky 8 默认源无 cri-tools，从 GitHub 安装 crictl 到 /usr/local/bin（root 可见）
+curl -sSL https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.30.0/crictl-v1.30.0-linux-amd64.tar.gz -o crictl.tar.gz
+sudo tar zxvf crictl.tar.gz -C /usr/local/bin
+rm -f crictl.tar.gz
+# K8s 1.24+ 与 Docker 运行时需要 cri-dockerd（minikube none driver）
+# 在固定目录解压并安装到 /usr/bin（Rocky 上 sudo 的 secure_path 常不含 /usr/local/bin，故用 /usr/bin）
+CRIDOCKERD_VER=0.3.22
+cd /tmp && rm -rf cri-dockerd-install && mkdir cri-dockerd-install && cd cri-dockerd-install
+curl -sSL "https://github.com/Mirantis/cri-dockerd/releases/download/v${CRIDOCKERD_VER}/cri-dockerd-${CRIDOCKERD_VER}.amd64.tgz" -o cri-dockerd.tgz
+tar zxvf cri-dockerd.tgz
+sudo install -m 0755 "$(find /tmp/cri-dockerd-install -name 'cri-dockerd' -type f | head -1)" /usr/bin/cri-dockerd
+rm -rf /tmp/cri-dockerd-install
+sudo which cri-dockerd
+curl -sSL https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.service -o /tmp/cri-docker.service
+curl -sSL https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.socket -o /tmp/cri-docker.socket
+# 装到 /usr/bin 以便 root（sudo 的 secure_path）能找到；service 默认即 /usr/bin/cri-dockerd，无需改
+sudo mv /tmp/cri-docker.service /tmp/cri-docker.socket /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cri-docker.socket
+# 确认 root 能找到 cri-dockerd 且 socket 已启（若仍报 NOT_FOUND_CRI_DOCKERD 见下）
+sudo which cri-dockerd
+sudo systemctl status cri-docker.socket
+# Rocky 8 none driver 还需：/etc/cni/net.d 存在、firewalld 放行 8443/10250、cgroups v1 时跳过校验（见下）
+sudo mkdir -p /etc/cni/net.d
+sudo firewall-cmd --permanent --add-port=8443/tcp --add-port=10250/tcp
+sudo firewall-cmd --reload
+# 登出再登入后安装 minikube（在可写目录下载，避免在已删的 /tmp/cri-dockerd-install 里写文件失败）
+cd ~
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+# 运行时填 docker；cri-dockerd 是让 Docker 支持 K8s 1.24+ 的后端，minikube 仍选 docker
+minikube start --driver=none --container-runtime=docker
+minikube addons enable ingress
+```
+
+**若仍报 `/etc/cni/net.d` 不存在**：执行 `sudo mkdir -p /etc/cni/net.d`。
+
+**若仍报 kernel 4.18 不支持 / cgroups v1 / SystemVerification**：minikube 的 `--extra-config` **不支持** `kubeadm.ignorePreflightErrors`，无法通过参数跳过该校验。**Rocky 8 上建议改用方案 A（k3s）**；若坚持用 Minikube，需升级内核到 5.x 或启用 cgroups v2。
+
+**若仍报 `NOT_FOUND_CRI_DOCKERD` 或 `which: no cri-dockerd`**：说明二进制未装进 root 的 PATH。请按下面**手动安装**（每步执行后看输出）：
+
+```bash
+# 1. 在固定目录下载并解压
+cd /tmp && rm -rf cri-dockerd-install && mkdir cri-dockerd-install && cd cri-dockerd-install
+curl -sSL "https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.22/cri-dockerd-0.3.22.amd64.tgz" -o cri-dockerd.tgz
+tar zxvf cri-dockerd.tgz
+# 2. 看解压出的内容（记下二进制实际路径，下面用）
+ls -laR
+# 3. 把二进制装到 /usr/bin（Rocky 上 root 的 PATH 常不含 /usr/local/bin，故用 /usr/bin）
+sudo install -m 0755 "$(find /tmp/cri-dockerd-install -name 'cri-dockerd' -type f | head -1)" /usr/bin/cri-dockerd
+# 若上面 find 为空，则手动指定：sudo install -m 0755 /tmp/cri-dockerd-install/cri-dockerd/cri-dockerd /usr/bin/cri-dockerd
+# 4. 确认 root 能找到
+sudo which cri-dockerd
+sudo /usr/bin/cri-dockerd --version
+# 5. 装 systemd 服务并启动（若尚未装；service 默认即 /usr/bin/cri-dockerd，无需改）
+sudo curl -sSL -o /etc/systemd/system/cri-docker.service https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.service
+sudo curl -sSL -o /etc/systemd/system/cri-docker.socket https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.socket
+sudo systemctl daemon-reload && sudo systemctl enable --now cri-docker.socket
+# 6. 删掉旧集群并用 cri-dockerd 重新起
+minikube delete
+minikube start --driver=none --container-runtime=docker
+minikube addons enable ingress
+```
+
+若为 **Ubuntu/Debian**，可仅执行：
+
+```bash
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
-# 登出再登入后安装 minikube
+# 登出再登入后安装 minikube（同上）
 curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
 sudo install minikube-linux-amd64 /usr/local/bin/minikube
 minikube start --driver=none
@@ -633,6 +726,16 @@ cd twixter.store
 
    **frontend/k8s/ingress.yaml** 同理，`host` 与 `tls.hosts` 改为 `www.twixter.store`（或 `twixter.store`），`secretName` 如 `twixter-frontend-tls`。  
    cert-manager 会自动创建上述 Secret 并续期。
+
+4. **若不使用 cert-manager：手动创建 TLS Secret**  
+   若使用自签名或已有证书，可在对应命名空间下手动创建 Secret（替换为你的证书与私钥文件）：
+
+   ```bash
+   kubectl create secret tls twixter-backend-tls --cert=api.twixter.store.crt --key=api.twixter.store.key
+   kubectl create secret tls twixter-frontend-tls --cert=www.twixter.store.crt --key=www.twixter.store.key
+   ```
+
+   Ingress 中的 `tls.secretName` 已配置为 `twixter-backend-tls` / `twixter-frontend-tls`，创建上述 Secret 后 Ingress 即可使用 HTTPS。
 
 ### 步骤 6：前端构建时使用真实域名
 
