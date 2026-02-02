@@ -879,6 +879,55 @@ cd ..
 
 若 80/443 由云厂商负载均衡或反向代理承接，需在该处将 80 转发到集群 NodePort 或 Ingress Controller 暴露的端口（k3s/minikube 单机常见为 NodePort 或 HostNetwork）。
 
+**k3s（Rocky Linux）浏览器打不开 api.twixter.store / www.twixter.store 时**
+
+1. **DNS / hosts**  
+   - 生产：`api.twixter.store`、`www.twixter.store` 的 A 记录指向 **k3s 节点公网 IP**（如 msd6200 的 IP）。  
+   - 本机调试：在**访问浏览器的电脑**上改 hosts，把上述域名指到 k3s 节点 IP（与 `kubectl get nodes -o wide` 里该节点 IP 或公网 IP 一致）。
+
+2. **Ingress Controller**  
+   当前 Ingress 使用 `ingressClassName: nginx`，k3s 默认是 **Traefik**。二选一：  
+   - **用 nginx**：按步骤 5 安装 nginx ingress 并禁用 Traefik；  
+   - **用 Traefik**：把 Ingress 的 `ingressClassName: nginx` 改为 `traefik`（或集群里实际 IngressClass 名），并去掉 nginx 专用 annotation，再 `kubectl apply`。
+
+3. **80/443 暴露与防火墙**  
+   - nginx ingress 若为 **NodePort**（如 80:31916、443:31379），本机 `curl http://127.0.0.1/` 会得到 000（80 端口无进程监听）。要让浏览器用 **http://api.twixter.store**（80 端口）访问，需让控制器直接占用节点 80/443：在 **k3s 节点**上执行：
+     ```bash
+     kubectl patch deploy ingress-nginx-controller -n ingress-nginx --type=merge -p '{"spec":{"template":{"spec":{"hostNetwork":true,"dnsPolicy":"ClusterFirstWithHostNet"}}}}'
+     kubectl rollout status deploy/ingress-nginx-controller -n ingress-nginx
+     ```
+     之后控制器会监听节点 80/443；防火墙已放行 http/https 即可用 `http://api.twixter.store/health`、`http://www.twixter.store` 访问。  
+     **若 rollout status 一直卡在 “1 old replicas are pending termination”**：新 Pod 可能 Pending，事件里常见 `didn't have free ports for the requested pod ports`，说明节点 80/443 已被占用（多为 **k3s 自带的 Traefik**）。  
+     1）先**回滚**：`kubectl rollout undo deploy/ingress-nginx-controller -n ingress-nginx`，然后放行 NodePort 31916/31379，用 `http://api.twixter.store:31916/health`、`http://www.twixter.store:31916`。  
+     2）若要坚持 hostNetwork 用 80/443：先释放节点 80/443。若 `sudo ss -tlnp | grep -E ':80|:443'` 显示 **httpd（Apache）** 在监听，可停用：`sudo systemctl stop httpd`（或 `sudo systemctl disable --now httpd`）。若为 **Traefik**：`kubectl get deploy -n kube-system -o name | grep traefik | xargs -r kubectl delete -n kube-system`。确认 80/443 无输出后，再执行上面的 `kubectl patch ... hostNetwork` 并 `rollout status`。  
+     3）若需**保留 Apache** 且用 80/443 访问站点：不要给 nginx ingress 开 hostNetwork；保持 NodePort（如 31916/31379），在 Apache 里配置**反向代理**，把 `api.twixter.store`、`www.twixter.store` 的 80/443 代理到 `http://127.0.0.1:31916` 和 `https://127.0.0.1:31379`（或仅 HTTP 代理到 31916），详见下方「Apache 反向代理到 NodePort」。  
+   - 若不想改控制器，可放行 NodePort 并用 `http://api.twixter.store:31916`、`https://www.twixter.store:31379`（需同时放行 31916、31379）。
+   - **Apache 反向代理到 NodePort**（本机已用 httpd 占 80/443 时）：保持 nginx ingress 为 NodePort（80→31916，443→31379）。在 Apache 中为 `api.twixter.store`、`www.twixter.store` 建 VirtualHost，启用 `mod_proxy`、`mod_proxy_http`（HTTPS 时还有 `mod_ssl`、`mod_proxy_connect`），例如：
+     ```apache
+     # /etc/httpd/conf.d/twixter-proxy.conf（示例，路径以实际为准）
+     <VirtualHost *:80>
+       ServerName api.twixter.store
+       ProxyPreserveHost On
+       ProxyPass / http://127.0.0.1:31916/
+       ProxyPassReverse / http://127.0.0.1:31916/
+     </VirtualHost>
+     <VirtualHost *:80>
+       ServerName www.twixter.store
+       ProxyPreserveHost On
+       ProxyPass / http://127.0.0.1:31916/
+       ProxyPassReverse / http://127.0.0.1:31916/
+     </VirtualHost>
+     ```
+     然后 `sudo systemctl reload httpd`。访问 `http://api.twixter.store/health`、`http://www.twixter.store` 即经 Apache 转到 nginx ingress 的 NodePort。
+   - 在 **k3s 节点**上放行 80/443（或对应 NodePort）：  
+     `sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload`
+
+4. **前端 Pod 0/1 READY / 503 Service Temporarily Unavailable**  
+   若 `kubectl get pods` 里 frontend 为 `0/1 Running` 或 Ingress 返回 **503**，说明 nginx 找不到就绪的前端 Pod。先查：`kubectl get pods -l app=twixter-frontend`、`kubectl get endpoints twixter-frontend`（无 addresses 即无 Ready Pod）。修前端：看日志 `kubectl logs deployment/twixter-frontend --tail=80`；若 OOM 则提高 `resources.limits.memory` 与探针 `initialDelaySeconds`，再 `kubectl apply -k frontend/k8s/` 并 `kubectl rollout restart deployment/twixter-frontend`。等 frontend 变为 1/1 Running 后再访问。
+
+5. **“Your connection isn’t secure” / TLS 证书无效**  
+   Ingress 若配置了 TLS 但未安装 **cert-manager** 或证书未签发，浏览器会报不安全。可暂时用 **http://** 访问（如 `http://www.twixter.store`）；若 nginx 强制跳 HTTPS，可在 Ingress 上增加注解 `nginx.ingress.kubernetes.io/ssl-redirect: "false"` 临时关闭跳转。长期方案：安装 cert-manager、创建 ClusterIssuer（如 letsencrypt-prod），并确保 80 开放供 ACME HTTP-01 校验，证书签发后即可正常用 https。
+
 ### 生产部署小结（twixter.store）
 
 | 项目 | 本地/Minikube | 生产（twixter.store） |
