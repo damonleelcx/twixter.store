@@ -17,6 +17,8 @@ spec:
       labels:
         app: twixter-frontend
     spec:
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: frontend
           # Docker Hub: damonleelcx/twixter.store-frontend:latest ；构建时需传入 NEXT_PUBLIC_* 等 ARG

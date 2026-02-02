@@ -16,6 +16,8 @@ spec:
       labels:
         app: twixter-backend
     spec:
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: backend
           # Docker Hub: damonleelcx/twixter.store-backend ；或本地构建后使用该名称
