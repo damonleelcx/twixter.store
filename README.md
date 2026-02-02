@@ -695,7 +695,7 @@ cd twixter.store
    spec:
      acme:
        server: https://acme-v02.api.letsencrypt.org/directory
-       email: your-email@example.com
+       email: twixter.store@gmail.com
        privateKeySecretRef:
          name: letsencrypt-prod
        solvers:
@@ -788,6 +788,11 @@ cd ..
    cd ..
    ```
 
+   **环境变量（k3s / Rocky Linux 8）**  
+   后端镜像**构建时**不需要加载 `.env`（镜像内不打包敏感配置）。  
+   **运行时** env 由集群注入：在步骤 4 已编辑 `backend/k8s/.env` 并填写生产值；在仓库根目录执行 `kubectl apply -k k8s/` 时，Kustomize 会从 `backend/k8s/.env` 生成 Secret `twixter-backend-secret`，后端 Deployment 通过 `envFrom` 将该 Secret 与 ConfigMap 注入 Pod，因此无需在 `docker build` 时传 env。  
+   若未做步骤 4，请先执行 `cp backend/.env.example backend/k8s/.env` 并编辑 `backend/k8s/.env`，再执行 `kubectl apply -k k8s/`。
+
 2. **推送镜像到 Docker Hub**（若集群从 Hub 拉取）：
 
    ```bash
@@ -795,7 +800,37 @@ cd ..
    docker push damonleelcx/twixter.store-frontend:latest
    ```
 
-   若在服务器上本地构建且使用 k3s/minikube 的本地 Docker，可先 `eval $(minikube docker-env)` 再构建，则无需 push。
+   **本地构建且不推送到仓库时**（按集群类型二选一）：
+   - **Minikube**：先 `eval $(minikube docker-env)` 再构建，则镜像在 Minikube 内可见，无需 push。
+   - **k3s**：k3s 无 `minikube docker-env` 等价命令。可选其一：
+     1. **导入到 k3s 的 containerd**：构建后执行  
+        `docker save <镜像名>:<tag> | sudo k3s ctr images import -`  
+        则集群可直接使用该镜像（无需 push）。
+     2. **安装 k3s 时使用本机 Docker**：安装时加 `--docker`（如  
+        `curl -sfL https://get.k3s.io | sh -s - --docker`），则本机 `docker build` 的镜像与 k3s 共用同一 Docker，直接构建即可，无需 push。
+
+   **k3s 从 Docker Hub 拉取镜像（ErrImagePull / ImagePullBackOff）**  
+   k3s 使用自带的 containerd，**不会**使用本机 `docker login`。若从 Docker Hub 拉取镜像（含私有或需登录的仓库），需在集群内创建拉取凭据 Secret `regcred`（backend/frontend 的 Deployment 已配置 `imagePullSecrets: - name: regcred`）。在**已执行过 `docker login` 的机器**上执行其一即可：
+
+   ```bash
+   # 方式一：用本机 ~/.docker/config.json 生成（推荐，与 docker login 一致）
+   kubectl create secret generic regcred \
+     --from-file=.dockerconfigjson=$HOME/.docker/config.json \
+     --type=kubernetes.io/dockerconfigjson \
+     -n default
+   ```
+
+   ```bash
+   # 方式二：直接填用户名/密码（替换为你的 Docker Hub 用户名与 Access Token 或密码）
+   kubectl create secret docker-registry regcred \
+     --docker-server=https://index.docker.io/v1/ \
+     --docker-username=你的用户名 \
+     --docker-password=你的密码或AccessToken \
+     --docker-email=你的邮箱 \
+     -n default
+   ```
+
+   若 Secret 已存在需更新：`kubectl delete secret regcred -n default` 再执行上面其一，然后 `kubectl rollout restart deployment/twixter-backend deployment/twixter-frontend`。
 
 3. **一次性部署**（在仓库根目录）：
 
