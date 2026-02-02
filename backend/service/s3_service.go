@@ -52,15 +52,18 @@ type s3Service struct {
 	downloader *s3manager.Downloader
 	bucket     string
 	region     string
+	endpoint   string // 自定义 endpoint（如另一家 S3 兼容存储），为空则用默认 AWS
 }
 
 // NewS3Service 创建S3服务实例
+// 支持自定义 endpoint（如 S3 兼容的其他厂商）：设置 AWS_ENDPOINT 时会使用该 endpoint 并启用 path-style。
 func NewS3Service() (S3Service, error) {
 	// 从环境变量获取配置
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	region := os.Getenv("AWS_REGION")
 	bucket := os.Getenv("AWS_S3_BUCKET")
+	endpoint := strings.TrimSpace(os.Getenv("AWS_ENDPOINT"))
 
 	if accessKey == "" || secretKey == "" {
 		return nil, fmt.Errorf("AWS credentials not configured")
@@ -72,11 +75,17 @@ func NewS3Service() (S3Service, error) {
 		return nil, fmt.Errorf("AWS_S3_BUCKET not configured")
 	}
 
-	// 创建AWS会话
-	sess, err := session.NewSession(&aws.Config{
+	cfg := &aws.Config{
 		Region:      aws.String(region),
 		Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
-	})
+	}
+	if endpoint != "" {
+		cfg.Endpoint = aws.String(endpoint)
+		cfg.S3ForcePathStyle = aws.Bool(true)
+	}
+
+	// 创建AWS会话
+	sess, err := session.NewSession(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AWS session: %w", err)
 	}
@@ -92,6 +101,7 @@ func NewS3Service() (S3Service, error) {
 		downloader: downloader,
 		bucket:     bucket,
 		region:     region,
+		endpoint:   endpoint,
 	}, nil
 }
 
@@ -118,7 +128,12 @@ func (s *s3Service) UploadFile(bucket, key string, file io.Reader, contentType s
 		return "", fmt.Errorf("failed to upload file to S3: %w", err)
 	}
 
-	// 返回文件URL
+	// 返回文件URL：自定义 endpoint 时用 path-style，否则用虚拟主机式
+	if s.endpoint != "" {
+		base := strings.TrimSuffix(s.endpoint, "/")
+		url := fmt.Sprintf("%s/%s/%s", base, bucket, key)
+		return url, nil
+	}
 	url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucket, s.region, key)
 	return url, nil
 }
