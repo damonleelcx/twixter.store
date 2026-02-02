@@ -10,6 +10,8 @@ metadata:
   annotations:
     # minikube 使用 nginx ingress
     nginx.ingress.kubernetes.io/proxy-body-size: "100gb"
+    # cert-manager 自动签发证书（需先安装 cert-manager 并创建 ClusterIssuer letsencrypt-prod）
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
 spec:
@@ -26,7 +28,7 @@ spec:
                 name: twixter-backend
                 port:
                   number: 8080
-  # 若需 TLS，取消注释并创建 tls secret（或使用 cert-manager 自动签发）
+  # TLS：cert-manager 会根据下方 secretName 自动创建/续期证书；若不用 cert-manager，可手动 kubectl create secret tls twixter-backend-tls ...
   tls:
     - hosts:
         - api.twixter.store

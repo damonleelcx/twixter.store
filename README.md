@@ -366,9 +366,11 @@ kubectl logs deployment/twixter-backend
    - 检查 `backend/k8s/.env` 中 `DB_HOST`、`DB_USER`、`DB_PASSWORD`、`DB_NAME`、`DB_PORT`、`DB_SSLMODE` 是否为**托管 Postgres** 的真实值，且从本机/集群能访问该主机（防火墙、安全组、VPC）。  
    - 修改后重新部署：`kubectl apply -k k8s/`，再 `kubectl rollout restart deployment/twixter-backend`。
 
-   **使用本机 Postgres（Minikube）**：后端在 Pod 里跑，Pod 里的 `localhost` / `127.0.0.1` 指向 Pod 自己，**不是你的电脑**。若 Postgres 装在本机，在 `backend/k8s/.env` 里要把 `DB_HOST` 写成 Minikube 能解析到本机的地址，不要用 `localhost` 或 `127.0.0.1`：
+   **使用本机 Postgres（Minikube）**：后端在 Pod 里跑，Pod 里的 `localhost` / `127.0.0.1` 指向 Pod 自己，**不是你的电脑**。若 Postgres 装在本机，在 `backend/k8s/.env` 里要把 `DB_HOST` 写成集群能解析到本机的地址，不要用 `localhost` 或 `127.0.0.1`：
    - **Minikube**：`DB_HOST=host.minikube.internal`（Minikube 提供的指向宿主机的主机名）。
    - **Docker Desktop K8s**：`DB_HOST=host.docker.internal`。
+   - **k3d（Docker 里跑 k3s）**：`DB_HOST=host.k3d.internal`（k3d 提供的指向宿主机的主机名）。
+   - **裸机 k3s**：k3s 无内置 host 别名，需用宿主机 IP，例如 `DB_HOST=192.168.1.100`（换成你机器的实际 IP）。
    - 其它如 `DB_USER`、`DB_PASSWORD`、`DB_NAME`（如 `twixter-store`）、`DB_PORT=5432` 按本机 Postgres 填写；本机若未开 SSL 可设 `DB_SSLMODE=disable`。
    - **本机 Postgres 必须接受来自 Minikube 的连接**：在 Postgres 的 `postgresql.conf` 里设 `listen_addresses = '*'`（或至少包含本机对 Minikube 网段的 IP），在 `pg_hba.conf` 里允许 Minikube 网段（如 `192.168.0.0/16` 或 `10.0.0.0/8`）的 TCP 连接，然后重启 Postgres。否则 Pod 仍会连不上。
 
@@ -753,6 +755,26 @@ docker build -t damonleelcx/twixter.store-frontend:latest \
 cd ..
 ```
 
+**Rocky Linux 8 / k3s：从 `.env` 加载变量再构建**  
+在 Rocky 8 上若使用 `frontend/.env` 存放 Stripe/PayPal 等 key，先加载再构建（与 Minikube 小节中的 bash 方式相同）：
+
+```bash
+cd frontend
+# 加载 .env，使 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 等传入下面的 docker build
+[ -f .env ] && set -a && . ./.env && set +a
+docker build -t damonleelcx/twixter.store-frontend:latest \
+  --build-arg NEXT_PUBLIC_API_URL="https://api.twixter.store" \
+  --build-arg NEXT_PUBLIC_APP_URL="https://www.twixter.store" \
+  --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}" \
+  --build-arg NEXT_PUBLIC_PAYPAL_CLIENT_ID="${NEXT_PUBLIC_PAYPAL_CLIENT_ID:-}" \
+  --build-arg BACKEND_URL="http://twixter-backend:8080" \
+  .
+cd ..
+```
+
+- `set -a`：之后执行的变量赋值都会导出到环境；`. ./.env` 会执行 `frontend/.env` 里的 `KEY=VALUE`，从而把变量放进当前 shell 环境；`set +a` 关闭该行为。
+- `"${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}"` 表示使用环境变量值，若未设置则为空；key 不要写进 README，放在 `.env` 即可。
+
 - `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_APP_URL` 必须使用 **https://api.twixter.store** 和 **https://www.twixter.store**，与 Ingress 及 DNS 一致。
 - 若镜像在 CI 或本机构建后推送到 Docker Hub，服务器上拉取同一镜像即可，无需在服务器上再构建。
 
@@ -791,6 +813,30 @@ cd ..
 
    若证书未就绪，可查看：`kubectl describe certificate twixter-backend-tls`（及 frontend 的），确认 ACME challenge 是否成功。
 
+**Rocky Linux 8**  
+在 Rocky Linux 8 上，步骤 5–7 中的 `kubectl`、`docker` 命令同样适用。若尚未安装 kubectl 或 Docker，可先执行：
+
+- **安装 kubectl**：
+
+  ```bash
+  sudo dnf install -y curl
+  curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+  ```
+
+- **安装 Docker CE**：
+
+  ```bash
+  sudo dnf install -y dnf-plugins-core
+  sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+  sudo dnf install -y docker-ce docker-ce-cli containerd.io
+  sudo systemctl enable --now docker
+  sudo usermod -aG docker $USER
+  ```
+
+  注销并重新登录后，`docker` 无需 sudo。  
+  若使用 **Podman** 替代 Docker（Rocky 8 默认可用）：`sudo dnf install -y podman`，步骤 6–7 中的 `docker build` / `docker push` 可改为 `podman build` / `podman push`，并视需要配置集群使用 Podman 拉取的镜像。
+
 ### 步骤 8：验证访问
 
 - **后端**：`https://api.twixter.store/health`
@@ -827,10 +873,12 @@ For Docker/Kubernetes and video processing details, see:
 
 ### 1. 改 backend/k8s/.env 里的 DB 配置
 
-在 `backend/k8s/.env` 里，把 `DB_HOST` 改成 Minikube 能解析到你本机的地址：
+在 `backend/k8s/.env` 里，把 `DB_HOST` 改成集群能解析到你本机的地址：
 
 - **Minikube**：`DB_HOST=host.minikube.internal`
 - **Docker Desktop 自带的 K8s**：`DB_HOST=host.docker.internal`
+- **k3d（Docker 里跑 k3s）**：`DB_HOST=host.k3d.internal`
+- **裸机 k3s**：无内置 host 别名，用宿主机 IP，例如 `DB_HOST=192.168.1.100`（换成你机器的实际 IP）
 
 其它按你本机 Postgres 填写，例如：
 
