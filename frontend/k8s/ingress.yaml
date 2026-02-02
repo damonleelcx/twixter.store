@@ -14,7 +14,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: www.twixter.local
+    - host: www.twixter.store
       http:
         paths:
           - path: /
@@ -24,8 +24,8 @@ spec:
                 name: twixter-frontend
                 port:
                   number: 3000
-  # 若需 TLS，取消注释并创建 tls secret
-  # tls:
-  #   - hosts:
-  #       - www.twixter.local
-  #     secretName: twixter-frontend-tls
+  # 若需 TLS，取消注释并创建 tls secret（或使用 cert-manager 自动签发）
+  tls:
+    - hosts:
+        - www.twixter.store
+      secretName: twixter-frontend-tls
