@@ -1,8 +1,10 @@
 # 在仓库根目录一次性部署前后端：kubectl apply -k k8s/
 # 前置：backend/.env（后端 Secret）、minikube addons enable ingress
 # hosts：api.twixter.local -> backend，www.twixter.local -> frontend
+# HTTPS：安装 cert-manager 后应用 k8s/cert-manager-cluster-issuer.yaml（替换 YOUR_EMAIL），见 k8s/README.TLS.md
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - cert-manager-cluster-issuer.yaml
   - ../backend/k8s
   - ../frontend/k8s
