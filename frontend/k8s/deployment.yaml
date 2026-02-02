@@ -34,25 +34,22 @@ spec:
                 name: twixter-frontend-secret
           resources:
             requests:
-              memory: "128Mi"
+              memory: "256Mi"
               cpu: "100m"
             limits:
-              memory: "512Mi"
+              memory: "1Gi"
               cpu: "500m"
+          # 用 tcpSocket 避免 / 触发 SSR 导致探针超时、Pod 一直 0/1
           livenessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: 3000
             initialDelaySeconds: 15
             periodSeconds: 20
-            timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: 3000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 3
             failureThreshold: 3
       restartPolicy: Always
