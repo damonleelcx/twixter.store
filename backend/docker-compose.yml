@@ -23,11 +23,12 @@ services:
       - REDIS_DB=0
       # Sentry configuration
       - SENTRY_DSN=${SENTRY_DSN:-}
-      # AWS S3 configuration (for video upload)
+      # AWS S3 configuration (for video upload); set AWS_ENDPOINT for S3-compatible providers (path-style)
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET}
+      - AWS_ENDPOINT=${AWS_ENDPOINT:-}
       # Kafka：容器内必须用服务名 kafka:9092，不能使用 localhost
       - KAFKA_BROKERS=kafka:9092
       # Stripe payment configuration
