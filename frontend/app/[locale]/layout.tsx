@@ -1,4 +1,5 @@
 import { routing } from "@/i18n/routing";
+import { getBaseUrlForMetadata } from "@/lib/metadata";
 import type { Metadata } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
@@ -32,7 +33,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale } = await params;
   const messages = (await import(`@/messages/${locale}.json`)).default;
   const meta = messages.meta as { title: string; description: string };
-  return { title: meta.title, description: meta.description };
+  return {
+    metadataBase: new URL(getBaseUrlForMetadata()),
+    title: meta.title,
+    description: meta.description,
+  };
 }
 
 export default async function LocaleLayout({ children, params }: Props) {
