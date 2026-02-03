@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	adminUserID     = 7
-	priceCredits    = 10
+	adminUserID     = 1
+	priceCredits    = 12.99
 	categoryDark    = "dark"
 	maxTagsFromName = 5
 )

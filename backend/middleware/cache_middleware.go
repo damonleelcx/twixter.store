@@ -96,6 +96,12 @@ func (cm *CacheMiddleware) Cache(options CacheOptions) gin.HandlerFunc {
 		if writer.Status() >= 200 && writer.Status() < 300 {
 			// 获取响应体
 			responseBody := writer.body.String()
+			// 超过此大小不写入 Redis，避免 "Single item size exceeds maxSize" 等限制
+			const maxCacheBodyBytes = 512 * 1024 // 512KB
+			if len(responseBody) > maxCacheBodyBytes {
+				// 跳过缓存，避免超大响应撑爆 Redis
+				return
+			}
 
 			// 确定 TTL
 			ttl := options.TTL
@@ -105,7 +111,7 @@ func (cm *CacheMiddleware) Cache(options CacheOptions) gin.HandlerFunc {
 
 			// 存储到缓存
 			if ttl > 0 {
-				cm.client.Set(ctx, cacheKey, responseBody, ttl)
+				_ = cm.client.Set(ctx, cacheKey, responseBody, ttl).Err()
 			}
 		}
 	}

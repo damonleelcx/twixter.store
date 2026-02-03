@@ -221,6 +221,10 @@ func setupContentRoutes(
 		contentAuthRoutes.PATCH("/:id",
 			middleware.RequirePermission(repos.UserPermissionRepo, "can_edit_content"),
 			contentController.UpdateContent)
+		// 删除内容（需 can_delete_content 权限，仅 admin）
+		contentAuthRoutes.DELETE("/:id",
+			middleware.RequirePermission(repos.UserPermissionRepo, "can_delete_content"),
+			contentController.DeleteContent)
 		// 书签：添加 / 移除
 		contentAuthRoutes.POST("/:id/bookmark", contentController.AddBookmark)
 		contentAuthRoutes.DELETE("/:id/bookmark", contentController.RemoveBookmark)

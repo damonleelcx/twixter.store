@@ -30,6 +30,9 @@ func (n noopS3Service) DownloadFileToPath(bucket, key, localPath string) error {
 func (n noopS3Service) DeleteFile(bucket, key string) error {
 	return errServiceUnavailable
 }
+func (n noopS3Service) ListKeysByPrefix(bucket, prefix string) ([]string, error) {
+	return nil, errServiceUnavailable
+}
 func (n noopS3Service) GetFileURL(bucket, key string, expiresIn time.Duration) (string, error) {
 	return "", errServiceUnavailable
 }

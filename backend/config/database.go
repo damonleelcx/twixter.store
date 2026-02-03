@@ -20,7 +20,7 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// InitDB 初始化数据库连接
+// InitDB 初始化数据库连接，带重试（适用于 k8s 中 DB 晚于 Pod 就绪的场景）
 func InitDB() (*gorm.DB, error) {
 	// 从环境变量获取数据库连接信息，如果没有则使用默认值
 	host := getEnv("DB_HOST", "localhost")
@@ -34,24 +34,40 @@ func InitDB() (*gorm.DB, error) {
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
 		host, user, password, dbname, port, sslmode)
 
-	// 连接数据库
-	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	maxRetries := 10
+	retryDelay := 2 * time.Second
+
+	var database *gorm.DB
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		database, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if err == nil {
+			sqlDB, dbErr := database.DB()
+			if dbErr != nil {
+				database = nil
+				err = dbErr
+			} else if pingErr := sqlDB.Ping(); pingErr != nil {
+				sqlDB.Close()
+				database = nil
+				err = pingErr
+			} else {
+				// 配置连接池，避免长时间空闲连接被服务端/防火墙关闭后仍被复用导致 connection refused
+				sqlDB.SetMaxIdleConns(5)
+				sqlDB.SetMaxOpenConns(25)
+				sqlDB.SetConnMaxLifetime(5 * time.Minute) // 定期回收连接，减少使用已断开的连接
+				log.Println("Successfully connected to PostgreSQL database")
+				return database, nil
+			}
+		}
+		if i < maxRetries-1 {
+			log.Printf("Failed to connect to database (attempt %d/%d): %v. Retrying in %v...", i+1, maxRetries, err, retryDelay)
+			time.Sleep(retryDelay)
+		} else {
+			return nil, fmt.Errorf("failed to connect to database after %d attempts: %w", maxRetries, err)
+		}
 	}
 
-	// 测试数据库连接
-	sqlDB, err := database.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get database instance: %w", err)
-	}
-
-	if err := sqlDB.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	log.Println("Successfully connected to PostgreSQL database")
-	return database, nil
+	return nil, fmt.Errorf("failed to connect to database")
 }
 
 // InitRedis 初始化 Redis 连接

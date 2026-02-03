@@ -4,7 +4,7 @@ import { PostContent } from "@/components/PostContent";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import { SaveViewingFromUrl } from "@/components/SaveViewingFromUrl";
 import { AUTH_TOKEN_COOKIE, getContentByIdServer } from "@/lib/api";
-import { getBaseUrlForMetadata, isSecureUrlForMeta } from "@/lib/metadata";
+import { ensureAbsoluteUrl, getBaseUrlForMetadata, isSecureUrlForMeta } from "@/lib/metadata";
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 import { cookies } from "next/headers";
@@ -42,9 +42,10 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
     (content.author_username ? `Content by @${content.author_username} on ${SITE_NAME}` : DEFAULT_DESCRIPTION);
   const descTruncated = description.length > 160 ? description.slice(0, 157) + "..." : description;
   const canonicalUrl = `${getBaseUrlForMetadata()}/${locale}/post/${id}`;
-  const rawOgImage =
+  const rawOgImage = ensureAbsoluteUrl(
     data.files?.[0]?.gif_file_url ||
-    (data.files?.[0] as { original_file_url?: string } | undefined)?.original_file_url;
+    (data.files?.[0] as { original_file_url?: string } | undefined)?.original_file_url
+  );
   const ogImage = isSecureUrlForMeta(rawOgImage) ? rawOgImage : undefined;
   const keywords =
     Array.isArray(content.tags) && content.tags.length > 0

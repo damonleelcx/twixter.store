@@ -154,6 +154,9 @@ export function LibraryList() {
           key={item.id}
           item={{ ...item, purchased: true }}
           locale={locale}
+          onDeleted={(deletedItem) => {
+            setItems((prev) => prev.filter((i) => i.id !== deletedItem.id));
+          }}
         />
       ))}
       <div

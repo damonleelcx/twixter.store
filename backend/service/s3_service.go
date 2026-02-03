@@ -35,6 +35,9 @@ type S3Service interface {
 	// DeleteFile 从S3删除文件
 	DeleteFile(bucket, key string) error
 
+	// ListKeysByPrefix 按前缀列出对象 key（用于批量删除转码目录等）
+	ListKeysByPrefix(bucket, prefix string) ([]string, error)
+
 	// GetFileURL 获取文件的预签名URL
 	GetFileURL(bucket, key string, expiresIn time.Duration) (string, error)
 
@@ -128,9 +131,13 @@ func (s *s3Service) UploadFile(bucket, key string, file io.Reader, contentType s
 		return "", fmt.Errorf("failed to upload file to S3: %w", err)
 	}
 
-	// 返回文件URL：自定义 endpoint 时用 path-style，否则用虚拟主机式
+	// 返回文件URL：自定义 endpoint 时用 path-style，否则用虚拟主机式。
+	// 必须带 https 协议，否则前端会把 URL 当相对路径请求到当前站点导致 404。
 	if s.endpoint != "" {
 		base := strings.TrimSuffix(s.endpoint, "/")
+		if base != "" && !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+			base = "https://" + base
+		}
 		url := fmt.Sprintf("%s/%s/%s", base, bucket, key)
 		return url, nil
 	}
@@ -241,6 +248,34 @@ func (s *s3Service) DeleteFile(bucket, key string) error {
 	}
 
 	return nil
+}
+
+// ListKeysByPrefix 按前缀列出对象 key（用于批量删除转码目录等）
+func (s *s3Service) ListKeysByPrefix(bucket, prefix string) ([]string, error) {
+	if bucket == "" {
+		bucket = s.bucket
+	}
+	var keys []string
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+	}
+	for {
+		out, err := s.s3Client.ListObjectsV2(input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list S3 objects by prefix: %w", err)
+		}
+		for _, obj := range out.Contents {
+			if obj.Key != nil {
+				keys = append(keys, *obj.Key)
+			}
+		}
+		if !aws.BoolValue(out.IsTruncated) {
+			break
+		}
+		input.ContinuationToken = out.NextContinuationToken
+	}
+	return keys, nil
 }
 
 // GetFileURL 获取文件的预签名URL

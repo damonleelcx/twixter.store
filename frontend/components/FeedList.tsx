@@ -210,6 +210,9 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
             // Refetch current page so GIF preview and server state are correct
             loadPage(0, false);
           }}
+          onDeleted={(deletedItem) => {
+            setItems((prev) => prev.filter((i) => i.id !== deletedItem.id));
+          }}
         />
       ))}
       <div

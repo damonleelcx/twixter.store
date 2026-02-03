@@ -23,3 +23,15 @@ export function isSecureUrlForMeta(url: string | undefined): boolean {
   if (!url || typeof url !== "string") return false;
   return url.startsWith("https://") || url.startsWith("/");
 }
+
+/**
+ * 若 URL 无协议（如 S3 endpoint 只配了 host），补上 https://，避免被浏览器当相对路径请求到当前站导致 404。
+ */
+export function ensureAbsoluteUrl(url: string | undefined): string | undefined {
+  if (!url || typeof url !== "string") return undefined;
+  const t = url.trim();
+  if (!t) return undefined;
+  if (t.startsWith("http://") || t.startsWith("https://")) return t;
+  if (t.startsWith("//")) return "https:" + t;
+  return "https://" + t;
+}

@@ -26,6 +26,13 @@ func InitPermissions(db *gorm.DB) {
 			IsSystem:    true,
 		},
 		{
+			Name:        "can_delete_content",
+			Description: "允许删除内容（仅 admin 拥有）",
+			Resource:    "content",
+			Action:      entity.ActionDelete,
+			IsSystem:    true,
+		},
+		{
 			Name:        "can_view_analytics",
 			Description: "允许查看分析数据",
 			Resource:    "analytics",
