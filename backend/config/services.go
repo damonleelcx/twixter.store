@@ -74,6 +74,7 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 		emailService = service.NoopEmailService()
 	} else if emailReal == nil {
 		emailService = service.NoopEmailService()
+		log.Println("Email service disabled (SMTP_HOST not set); password reset emails will not be sent.")
 	} else {
 		emailService = emailReal
 		log.Println("Email service (SMTP) initialized for password reset.")

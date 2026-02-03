@@ -3,10 +3,12 @@ package service
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/smtp"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // EmailService 邮件发送服务接口（用于密码重置等）
@@ -75,13 +77,15 @@ func (e *emailService) SendPasswordResetEmail(to, resetLink string) error {
 		"Content-Type: text/plain; charset=UTF-8\r\n" +
 		"\r\n" + body
 
-	addr := fmt.Sprintf("%s:%d", e.host, e.port)
+	addr := net.JoinHostPort(e.host, strconv.Itoa(e.port))
 	auth := smtp.PlainAuth("", e.user, e.password, e.host)
 
+	const dialTimeout = 15 * time.Second
 	if e.useTLS {
 		// 隐式 TLS (如 465)
 		tlsConfig := &tls.Config{ServerName: e.host}
-		conn, err := tls.Dial("tcp", addr, tlsConfig)
+		dialer := &net.Dialer{Timeout: dialTimeout}
+		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 		if err != nil {
 			return fmt.Errorf("smtp tls dial: %w", err)
 		}
@@ -114,9 +118,14 @@ func (e *emailService) SendPasswordResetEmail(to, resetLink string) error {
 	}
 
 	// 587 STARTTLS
-	client, err := smtp.Dial(addr)
+	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 	if err != nil {
 		return fmt.Errorf("smtp dial: %w", err)
+	}
+	defer conn.Close()
+	client, err := smtp.NewClient(conn, e.host)
+	if err != nil {
+		return fmt.Errorf("smtp new client: %w", err)
 	}
 	defer client.Close()
 	if ok, _ := client.Extension("STARTTLS"); ok {

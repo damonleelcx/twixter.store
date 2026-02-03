@@ -11,3 +11,6 @@ data:
   # FFmpeg 在镜像内，留空由应用使用 PATH
   FFMPEG_PATH: ""
   FFPROBE_PATH: ""
+  # k3s 等无法直连 api.stripe.com 时，填写代理地址（如 http://proxy:3128），Backend 会经代理访问 Stripe
+  HTTPS_PROXY: ""
+  HTTP_PROXY: ""
