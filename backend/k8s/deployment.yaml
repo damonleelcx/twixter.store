@@ -16,19 +16,6 @@ spec:
       labels:
         app: twixter-backend
     spec:
-      # 使用外部 DNS，避免依赖集群 DNS（10.43.0.10）不可用导致 Stripe 等解析失败
-      dnsPolicy: "None"
-      dnsConfig:
-        nameservers:
-          - 8.8.8.8
-          - 8.8.4.4
-        searches:
-          - default.svc.cluster.local
-          - svc.cluster.local
-          - cluster.local
-        options:
-          - name: ndots
-            value: "5"
       imagePullSecrets:
         - name: regcred
       containers:
