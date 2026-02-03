@@ -149,13 +149,13 @@ cd ..
 ```
 
 **Frontend**（在项目根目录下）：  
-前端镜像构建时需传入浏览器访问的 API/APP 地址（用刚才在 hosts 里配的域名，不要写死 Minikube IP，这样换 IP 不用重做镜像）。若使用 `frontend/.env`，先加载再构建：
+前端镜像构建时需传入浏览器访问的 API/APP 地址（用刚才在 hosts 里配的域名，不要写死 Minikube IP，这样换 IP 不用重做镜像）。若使用 `frontend/k8s/.env`，先加载再构建：
 
 ```bash
 eval $(minikube docker-env)
 cd frontend
-# 若有 .env，先加载以便 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 等传入构建
-[ -f .env ] && set -a && . ./.env && set +a
+# 若有 k8s/.env，先加载以便 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 等传入构建
+[ -f k8s/.env ] && set -a && . ./k8s/.env && set +a
 docker build -t damonleelcx/twixter.store-frontend:latest \
   --build-arg NEXT_PUBLIC_API_URL="http://api.twixter.local" \
   --build-arg NEXT_PUBLIC_APP_URL="http://www.twixter.local" \
@@ -166,13 +166,13 @@ docker build -t damonleelcx/twixter.store-frontend:latest \
 cd ..
 ```
 
-**Windows (PowerShell) — Frontend**（在项目根目录下；若有 `frontend/.env` 会先加载到当前进程）：
+**Windows (PowerShell) — Frontend**（在项目根目录下；若有 `frontend/k8s/.env` 会先加载到当前进程）：
 
 ```powershell
 minikube docker-env --shell powershell | Invoke-Expression
 cd frontend
-# 若有 .env，加载到当前进程以便 NEXT_PUBLIC_* 等传入构建
-if (Test-Path .env) { Get-Content .env | Where-Object { $_ -notmatch '^\s*#' -and $_ -match '=' } | ForEach-Object { $p = $_ -split '=',2; Set-Item -Path "Env:$($p[0].Trim())" -Value $p[1].Trim() } }
+# 若有 k8s/.env，加载到当前进程以便 NEXT_PUBLIC_* 等传入构建
+if (Test-Path k8s/.env) { Get-Content k8s/.env | Where-Object { $_ -notmatch '^\s*#' -and $_ -match '=' } | ForEach-Object { $p = $_ -split '=',2; Set-Item -Path "Env:$($p[0].Trim())" -Value $p[1].Trim() } }
 docker build -t damonleelcx/twixter.store-frontend:latest `
   --build-arg NEXT_PUBLIC_API_URL="http://api.twixter.local" `
   --build-arg NEXT_PUBLIC_APP_URL="http://www.twixter.local" `
@@ -188,8 +188,8 @@ cd ..
 ```cmd
 for /f "tokens=*" %i in ('minikube docker-env --shell cmd') do %i
 cd frontend
-REM 若有 frontend/.env：把文件里的 KEY=VALUE 读进当前 CMD，下面 docker build 的 %NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY% 等会用到；没有 .env 可跳过本行
-if exist .env for /f "usebackq eol=# tokens=1* delims==" %a in (".env") do set "%~a=%~b"
+REM 若有 frontend/k8s/.env：把文件里的 KEY=VALUE 读进当前 CMD，下面 docker build 的 %NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY% 等会用到；没有可跳过本行
+if exist k8s\.env for /f "usebackq eol=# tokens=1* delims==" %a in ("k8s\.env") do set "%~a=%~b"
 docker build -t damonleelcx/twixter.store-frontend:latest ^
   --build-arg NEXT_PUBLIC_API_URL=http://api.twixter.local ^
   --build-arg NEXT_PUBLIC_APP_URL=http://www.twixter.local ^
@@ -201,11 +201,11 @@ cd ..
 ```
 
 说明：`NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_APP_URL` 使用 `api.twixter.local` 和 `www.twixter.local`，本机通过 hosts 把这两个域名解析到 Minikube IP，因此**无需在构建参数里写 Minikube IP**；Minikube IP 只用在 hosts 里。  
-**Minikube 构建时**：上面各段里的 `docker build` 已写死 API/APP/BACKEND 为 Minikube 用址（`api.twixter.local`、`www.twixter.local`、`twixter-backend:8080`），不会从 `frontend/.env` 读这些变量；`.env` 只用于传入 Stripe/PayPal 的 key。若 `.env` 里写了 `localhost:8080` 等，会被忽略，镜像仍按命令里的地址构建。
+**Minikube 构建时**：上面各段里的 `docker build` 已写死 API/APP/BACKEND 为 Minikube 用址（`api.twixter.local`、`www.twixter.local`、`twixter-backend:8080`），不会从 `frontend/k8s/.env` 读这些变量；`frontend/k8s/.env` 只用于传入 Stripe/PayPal 的 key。若 `frontend/k8s/.env` 里写了 `localhost:8080` 等，会被忽略，镜像仍按命令里的地址构建。
 
 ### 步骤 4：一次性部署前后端
 
-部署前请确保 **backend/k8s/.env** 已存在（可从 `backend/.env` 复制）；若前端需从 Secret 注入变量，则准备 **frontend/k8s/.env**（可从 `frontend/.env` 复制）。前端构建时若已用 `frontend/.env` 传入 Stripe/PayPal 等，镜像内已有；Pod 运行时还可通过 `frontend/k8s/.env` 生成的 Secret 再注入变量。
+部署前请确保 **backend/k8s/.env** 已存在（可从 `backend/.env` 复制）；前端需准备 **frontend/k8s/.env**（Stripe/PayPal 等 key，Kustomize 会据此生成 Secret）。前端构建时从 `frontend/k8s/.env` 加载并传入 Stripe/PayPal 等，镜像内已有；Pod 运行时还可通过该 Secret 再注入变量。
 
 在**仓库根目录**执行：
 
@@ -756,12 +756,12 @@ cd ..
 ```
 
 **Rocky Linux 8 / k3s：从 `.env` 加载变量再构建**  
-在 Rocky 8 上若使用 `frontend/.env` 存放 Stripe/PayPal 等 key，先加载再构建（与 Minikube 小节中的 bash 方式相同）：
+在 Rocky 8 上若使用 `frontend/k8s/.env` 存放 Stripe/PayPal 等 key，先加载再构建（与 Minikube 小节中的 bash 方式相同）：
 
 ```bash
 cd frontend
-# 加载 .env，使 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 等传入下面的 docker build
-[ -f .env ] && set -a && . ./.env && set +a
+# 加载 k8s/.env，使 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 等传入下面的 docker build
+[ -f k8s/.env ] && set -a && . ./k8s/.env && set +a
 docker build -t damonleelcx/twixter.store-frontend:latest \
   --build-arg NEXT_PUBLIC_API_URL="https://api.twixter.store" \
   --build-arg NEXT_PUBLIC_APP_URL="https://www.twixter.store" \
@@ -772,8 +772,8 @@ docker build -t damonleelcx/twixter.store-frontend:latest \
 cd ..
 ```
 
-- `set -a`：之后执行的变量赋值都会导出到环境；`. ./.env` 会执行 `frontend/.env` 里的 `KEY=VALUE`，从而把变量放进当前 shell 环境；`set +a` 关闭该行为。
-- `"${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}"` 表示使用环境变量值，若未设置则为空；key 不要写进 README，放在 `.env` 即可。
+- `set -a`：之后执行的变量赋值都会导出到环境；`. ./k8s/.env` 会执行 `frontend/k8s/.env` 里的 `KEY=VALUE`，从而把变量放进当前 shell 环境；`set +a` 关闭该行为。
+- `"${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}"` 表示使用环境变量值，若未设置则为空；key 不要写进 README，放在 `frontend/k8s/.env` 即可。
 
 - `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_APP_URL` 必须使用 **https://api.twixter.store** 和 **https://www.twixter.store**，与 Ingress 及 DNS 一致。
 - 若镜像在 CI 或本机构建后推送到 Docker Hub，服务器上拉取同一镜像即可，无需在服务器上再构建。

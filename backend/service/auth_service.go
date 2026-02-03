@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -55,11 +56,13 @@ type authService struct {
 	purchaseRepo       repository.PurchaseRepository
 	userPermissionRepo repository.UserPermissionRepository
 	permissionRepo     repository.PermissionRepository
+	emailService       EmailService // optional; nil 时不发邮件
 	db                 *gorm.DB
 }
 
-// NewAuthService Create authentication service instance
-func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, sessionRepo repository.SessionRepository, walletRepo repository.WalletRepository, purchaseRepo repository.PurchaseRepository, userPermissionRepo repository.UserPermissionRepository, permissionRepo repository.PermissionRepository) AuthService {
+// NewAuthService Create authentication service instance.
+// emailService 可为 nil，为 nil 时密码重置仅打印 token（开发用），不发送邮件。
+func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, sessionRepo repository.SessionRepository, walletRepo repository.WalletRepository, purchaseRepo repository.PurchaseRepository, userPermissionRepo repository.UserPermissionRepository, permissionRepo repository.PermissionRepository, emailService EmailService) AuthService {
 	return &authService{
 		userRepo:           userRepo,
 		sessionRepo:        sessionRepo,
@@ -67,6 +70,7 @@ func NewAuthService(db *gorm.DB, userRepo repository.UserRepository, sessionRepo
 		purchaseRepo:       purchaseRepo,
 		userPermissionRepo: userPermissionRepo,
 		permissionRepo:     permissionRepo,
+		emailService:       emailService,
 		db:                 db,
 	}
 }
@@ -558,11 +562,30 @@ func (s *authService) RequestPasswordReset(email string) error {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 
-	// TODO: Send password reset email
-	// Should call email service to send reset link
-	fmt.Printf("Password reset token: %s (for testing only, should be sent via email in production)\n", token)
+	if s.emailService != nil {
+		resetLink := getFrontendResetPasswordURL(token)
+		if err := s.emailService.SendPasswordResetEmail(user.Email, resetLink); err != nil {
+			log.Printf("Failed to send password reset email to %s: %v", user.Email, err)
+			// 不向调用方返回错误，避免泄露该邮箱是否已注册
+		}
+	} else {
+		fmt.Printf("Password reset token: %s (for testing only, set SMTP_* env to send email)\n", token)
+	}
 
 	return nil
+}
+
+// getFrontendResetPasswordURL 根据 FRONTEND_URL 生成重置密码链接（与 Stripe 等共用 FRONTEND_URL）
+func getFrontendResetPasswordURL(token string) string {
+	base := strings.TrimSpace(os.Getenv("FRONTEND_URL"))
+	if base == "" {
+		base = "http://localhost:3000"
+	}
+	base = strings.TrimSuffix(base, "/")
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		base = "http://" + base
+	}
+	return base + "/en/auth/reset-password?token=" + token
 }
 
 // ResetPassword Reset password
