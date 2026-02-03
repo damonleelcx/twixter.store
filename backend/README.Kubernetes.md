@@ -457,9 +457,12 @@ Backend 启动 Stripe 服务时会读取 `HTTPS_PROXY`/`HTTP_PROXY`，Stripe 请
    # 只允许 Pod 网段（避免对外暴露）
    echo 'Allow 10.42.0.0/16' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
    echo 'Allow 127.0.0.1' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
-   # 确保监听所有接口（Pod 通过节点 IP 连过来）
-   grep -q '^Listen 0.0.0.0' /etc/tinyproxy/tinyproxy.conf || echo 'Listen 0.0.0.0' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
+   # 必须监听 0.0.0.0，否则 Pod 连节点 IP 会 connection refused（默认或部分发行版为 Listen 127.0.0.1）
+   sudo sed -i '/^Listen /d' /etc/tinyproxy/tinyproxy.conf
+   echo 'Listen 0.0.0.0' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
    sudo systemctl enable --now tinyproxy
+   # 确认：应看到 0.0.0.0:8888，若为 127.0.0.1:8888 则 Pod 连不到
+   ss -tlnp | grep 8888
    ```
 
 2. **放行节点本机 8888 入站**（firewalld）：
@@ -482,6 +485,8 @@ Backend 启动 Stripe 服务时会读取 `HTTPS_PROXY`/`HTTP_PROXY`，Stripe 请
    ```
 
 5. **验证**：在 Pod 内应能连节点 8888：`kubectl run -it --rm debug --image=busybox --restart=Never -- sh -c "nc -zv 208.122.213.192 8888 || true"`（IP 换成你的节点 IP）。成功后 Stripe 请求会经节点上的 TinyProxy 转发。
+
+   **若仍报 connection refused**：Backend 与代理同节点时，用节点公网 IP 可能走「本机连本机」被拒。可改用 **Pod 的默认网关**（多为节点在集群内的 IP，k3s 常见为 `10.42.0.1`）：在 ConfigMap/Secret 里设 `HTTPS_PROXY=http://10.42.0.1:8888`（单节点时一般为 10.42.0.1）。多节点时需让 Backend 连到**其所在节点**的网关 IP，或继续用节点公网 IP 并确认该节点防火墙上 8888 已对 10.42.0.0/16 放行。
 
 ---
 
