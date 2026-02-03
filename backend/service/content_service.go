@@ -4,6 +4,7 @@ import (
 	"backend/entity"
 	"backend/repository"
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"image"
@@ -94,23 +95,27 @@ type ContentService interface {
 
 	// UpdateContent 更新内容元数据（需 can_edit_content 权限）
 	UpdateContent(contentID uint, name, description, category string, price float64, tagNames []string) error
+	// DeleteContent 删除内容（需 can_delete_content 权限，仅 admin）
+	DeleteContent(contentID uint) error
 }
 
 // ListFeedItem feed 列表单项（含作者、时间戳、标签，Twitter 风格）
+// 未购买项可带 PreviewGifBase64，前端直接使用 data URL，无需再请求 /preview
 type ListFeedItem struct {
-	ID             uint     `json:"id"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description"`
-	Category       string   `json:"category"`
-	Price          float64  `json:"price"`
-	PreviewGifURL  string   `json:"preview_gif_url"`
-	FirstFileID    uint     `json:"first_file_id"`
-	Purchased      bool     `json:"purchased"`
-	Bookmarked     bool     `json:"bookmarked,omitempty"`
-	CreatedAt      string   `json:"created_at"`
-	AuthorUsername string   `json:"author_username"`
-	AuthorAvatar   string   `json:"author_avatar,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
+	ID               uint     `json:"id"`
+	Name             string   `json:"name"`
+	Description      string   `json:"description"`
+	Category         string   `json:"category"`
+	Price            float64  `json:"price"`
+	PreviewGifURL    string   `json:"preview_gif_url"`
+	PreviewGifBase64 string   `json:"preview_gif_base64,omitempty"` // 列表预取的模糊 GIF（base64），有则前端不请求 /preview
+	FirstFileID      uint     `json:"first_file_id"`
+	Purchased        bool     `json:"purchased"`
+	Bookmarked       bool     `json:"bookmarked,omitempty"`
+	CreatedAt        string   `json:"created_at"`
+	AuthorUsername   string   `json:"author_username"`
+	AuthorAvatar     string   `json:"author_avatar,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
 }
 
 // contentService 内容服务实现
@@ -408,6 +413,47 @@ func (s *contentService) UpdateContent(contentID uint, name, description, catego
 	return nil
 }
 
+// DeleteContent 删除内容（从 S3 删除文件后软删除 DB 记录；需 can_delete_content 权限）
+func (s *contentService) DeleteContent(contentID uint) error {
+	if _, err := s.contentRepo.GetByID(contentID); err != nil {
+		return fmt.Errorf("content not found: %w", err)
+	}
+	files, err := s.fileRepo.GetByContentID(contentID)
+	if err != nil {
+		return fmt.Errorf("failed to get content files: %w", err)
+	}
+	// 从 S3 删除每个文件的原始、GIF、转码（m3u8 + segments）
+	for _, f := range files {
+		if f.OriginalFilePath != "" {
+			_ = s.s3Service.DeleteFile("", f.OriginalFilePath)
+		}
+		if f.GifFilePath != "" {
+			_ = s.s3Service.DeleteFile("", f.GifFilePath)
+		}
+		if f.TranscodedFilePath != "" {
+			prefix := strings.TrimSuffix(f.TranscodedFilePath, ".m3u8")
+			keys, listErr := s.s3Service.ListKeysByPrefix("", prefix)
+			if listErr == nil {
+				for _, key := range keys {
+					_ = s.s3Service.DeleteFile("", key)
+				}
+			} else {
+				_ = s.s3Service.DeleteFile("", f.TranscodedFilePath)
+			}
+		}
+	}
+	if err := s.contentTagRepo.RemoveAllTagsFromContent(contentID); err != nil {
+		return fmt.Errorf("failed to remove content tags: %w", err)
+	}
+	for _, f := range files {
+		_ = s.fileRepo.Delete(f.ID)
+	}
+	if err := s.contentRepo.Delete(contentID); err != nil {
+		return fmt.Errorf("failed to delete content: %w", err)
+	}
+	return nil
+}
+
 // GetContentFiles 获取内容的所有文件
 func (s *contentService) GetContentFiles(contentID uint) ([]*entity.ContentFile, error) {
 	return s.fileRepo.GetByContentID(contentID)
@@ -570,9 +616,14 @@ func (s *contentService) GetContentAnalytics(contentID uint, startDate, endDate 
 	return result, nil
 }
 
-// buildListFeedItems 将 contents 转为 ListFeedItem 列表（共用逻辑）
+// buildListFeedItems 将 contents 转为 ListFeedItem 列表（共用逻辑）；未购买项预取模糊 GIF 内联返回
 func (s *contentService) buildListFeedItems(contents []entity.Content, userID uint) ([]ListFeedItem, error) {
 	out := make([]ListFeedItem, 0, len(contents))
+	type blurJob struct {
+		idx  int
+		path string
+	}
+	var needBlur []blurJob
 	for _, c := range contents {
 		authorUsername := ""
 		if c.UploadedBy > 0 && s.userRepo != nil {
@@ -630,6 +681,7 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 			bookmarked, _ = s.contentBookmarkRepo.Exists(userID, c.ID)
 		}
 		tagNames, _ := s.GetContentTagNames(c.ID)
+		idx := len(out)
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -644,6 +696,36 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 			AuthorUsername: authorUsername,
 			Tags:           tagNames,
 		})
+		if !purchased && first.GifFilePath != "" {
+			needBlur = append(needBlur, blurJob{idx: idx, path: first.GifFilePath})
+		}
+	}
+	// 单条 base64 不超过此大小，避免触发 Redis/缓存 "Single item size exceeds maxSize"
+	const maxPreviewGifBase64Bytes = 256 * 1024 // 256KB per item
+	// 并发预取模糊 GIF（受 gifBlurSem 限制），写入 results 再合并到 out
+	results := make([]string, len(out))
+	var wg sync.WaitGroup
+	for _, job := range needBlur {
+		wg.Add(1)
+		go func(i int, gifPath string) {
+			defer wg.Done()
+			gifBlurSem <- struct{}{}
+			defer func() { <-gifBlurSem }()
+			blurred, err := s.getGifBlurredGIF(gifPath)
+			if err != nil {
+				return
+			}
+			b64 := base64.StdEncoding.EncodeToString(blurred)
+			if len(b64) <= maxPreviewGifBase64Bytes {
+				results[i] = b64
+			}
+		}(job.idx, job.path)
+	}
+	wg.Wait()
+	for i, b64 := range results {
+		if b64 != "" {
+			out[i].PreviewGifBase64 = b64
+		}
 	}
 	return out, nil
 }
@@ -825,7 +907,7 @@ func (s *contentService) UserCanViewContent(userID uint, contentID uint) (bool, 
 	return true, nil
 }
 
-// ListBookmarkedContent 返回当前用户书签的内容列表（Bookmarks 页）
+// ListBookmarkedContent 返回当前用户书签的内容列表（Bookmarks 页），未购买项预取模糊 GIF 与主 feed 一致
 func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) ([]ListFeedItem, error) {
 	if userID == 0 {
 		return nil, nil
@@ -834,51 +916,15 @@ func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) (
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ListFeedItem, 0, len(contentIDs))
+	contents := make([]entity.Content, 0, len(contentIDs))
 	for _, cid := range contentIDs {
 		c, err := s.contentRepo.GetByID(cid)
 		if err != nil || !c.IsReady() {
 			continue
 		}
-		authorUsername, _ := s.GetAuthorForUserID(c.UploadedBy)
-		if authorUsername == "" {
-			authorUsername = c.Name
-		}
-		files, err := s.fileRepo.GetByContentID(c.ID)
-		if err != nil || len(files) == 0 {
-			tagNames, _ := s.GetContentTagNames(c.ID)
-			out = append(out, ListFeedItem{
-				ID:             c.ID,
-				Name:           c.Name,
-				Description:    c.Description,
-				Category:       string(c.Category),
-				Price:          c.Price,
-				CreatedAt:      c.CreatedAt.Format(time.RFC3339),
-				AuthorUsername: authorUsername,
-				Bookmarked:     true,
-				Tags:           tagNames,
-			})
-			continue
-		}
-		first := files[0]
-		purchased, _ := s.UserCanViewContent(userID, c.ID)
-		tagNames, _ := s.GetContentTagNames(c.ID)
-		out = append(out, ListFeedItem{
-			ID:             c.ID,
-			Name:           c.Name,
-			Description:    c.Description,
-			Category:       string(c.Category),
-			Price:          c.Price,
-			PreviewGifURL:  first.GifFileURL,
-			FirstFileID:    first.ID,
-			Purchased:      purchased,
-			Bookmarked:     true,
-			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
-			AuthorUsername: authorUsername,
-			Tags:           tagNames,
-		})
+		contents = append(contents, *c)
 	}
-	return out, nil
+	return s.buildListFeedItems(contents, userID)
 }
 
 // GetGifPreview 返回 GIF 预览：已购买则流式返回原图；未购买则从 S3 取 GIF、模糊后返回 GIF
@@ -908,6 +954,9 @@ func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser,
 		}
 		return reader, contentType, nil
 	}
+	// 限制并发模糊数量，避免列表多预览并发时压垮 DB 连接/CPU
+	gifBlurSem <- struct{}{}
+	defer func() { <-gifBlurSem }()
 	blurred, err := s.getGifBlurredGIF(file.GifFilePath)
 	if err != nil {
 		return nil, "", err
@@ -916,6 +965,46 @@ func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser,
 }
 
 const gifBlurRadius = 3 // 较小半径更快，仍能模糊；5 太慢
+
+// gifBlurConcurrency 限制同时进行的 GIF 模糊处理数量；提高以加快列表首屏（8 可显著缩短等待）
+const gifBlurConcurrency = 8
+
+// maxPreviewGifFrames 列表预览最多模糊的帧数，超出则采样前 N 帧以加快单张处理
+const maxPreviewGifFrames = 12
+
+var gifBlurSem = make(chan struct{}, gifBlurConcurrency)
+
+func ensureLen(d []int, n int) []int {
+	if len(d) >= n {
+		return d[:n]
+	}
+	out := make([]int, n)
+	copy(out, d)
+	last := 0
+	if len(d) > 0 {
+		last = d[len(d)-1]
+	}
+	for i := len(d); i < n; i++ {
+		out[i] = last
+	}
+	return out
+}
+
+func ensureDisposalLen(d []byte, n int) []byte {
+	if len(d) >= n {
+		return d[:n]
+	}
+	out := make([]byte, n)
+	copy(out, d)
+	var last byte
+	if len(d) > 0 {
+		last = d[len(d)-1]
+	}
+	for i := len(d); i < n; i++ {
+		out[i] = last
+	}
+	return out
+}
 
 // getGifBlurredGIF 从 S3 拉取 GIF，逐帧模糊后编码为完整多帧 GIF（保留延迟与循环）
 func (s *contentService) getGifBlurredGIF(gifS3Key string) ([]byte, error) {
@@ -937,6 +1026,9 @@ func (s *contentService) getGifBlurredGIF(gifS3Key string) ([]byte, error) {
 	}
 
 	n := len(img.Image)
+	if n > maxPreviewGifFrames {
+		n = maxPreviewGifFrames
+	}
 	blurredFrames := make([]*image.Paletted, n)
 	workers := runtime.NumCPU()
 	if workers > n {
@@ -968,31 +1060,11 @@ func (s *contentService) getGifBlurredGIF(gifS3Key string) ([]byte, error) {
 
 	out := &gif.GIF{
 		Image:           blurredFrames,
-		Delay:           img.Delay,
-		Disposal:        img.Disposal,
+		Delay:           ensureLen(img.Delay, len(blurredFrames)),
+		Disposal:        ensureDisposalLen(img.Disposal, len(blurredFrames)),
 		LoopCount:       img.LoopCount,
 		Config:          img.Config,
 		BackgroundIndex: img.BackgroundIndex,
-	}
-	if len(img.Delay) < len(blurredFrames) {
-		out.Delay = make([]int, len(blurredFrames))
-		for i := range out.Delay {
-			if i < len(img.Delay) {
-				out.Delay[i] = img.Delay[i]
-			} else {
-				out.Delay[i] = img.Delay[len(img.Delay)-1]
-			}
-		}
-	}
-	if len(img.Disposal) < len(blurredFrames) {
-		out.Disposal = make([]byte, len(blurredFrames))
-		for i := range out.Disposal {
-			if i < len(img.Disposal) {
-				out.Disposal[i] = img.Disposal[i]
-			} else {
-				out.Disposal[i] = img.Disposal[len(img.Disposal)-1]
-			}
-		}
 	}
 
 	var buf bytes.Buffer

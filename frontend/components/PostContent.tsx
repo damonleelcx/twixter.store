@@ -2,6 +2,7 @@
 
 import {
   addBookmark,
+  deleteContent,
   fetchCurrentUser,
   getAccessToken,
   getApiBase,
@@ -11,6 +12,7 @@ import {
   removeBookmark,
   type ContentDetail,
 } from "@/lib/api";
+import { ensureAbsoluteUrl } from "@/lib/metadata";
 import { buildShareUrl } from "@/lib/viewing";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
@@ -59,11 +61,15 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
   const [bookmarking, setBookmarking] = useState(false);
   const [blurredPreviewUrl, setBlurredPreviewUrl] = useState<string | null>(null);
   const [canEditContent, setCanEditContent] = useState(false);
+  const [canDeleteContent, setCanDeleteContent] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetchCurrentUser().then((user) => {
-      setCanEditContent((user?.permissions ?? []).includes("can_edit_content"));
+      const perms = user?.permissions ?? [];
+      setCanEditContent(perms.includes("can_edit_content"));
+      setCanDeleteContent(perms.includes("can_delete_content"));
     });
   }, []);
 
@@ -326,7 +332,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
               contentId={contentId}
               durationSeconds={firstFile.duration}
               className="block w-full h-auto object-contain"
-              poster={blurredPreviewUrl ?? firstFile.gif_file_url ?? undefined}
+              poster={blurredPreviewUrl ?? ensureAbsoluteUrl(firstFile.gif_file_url) ?? undefined}
               playLabel={t("playVideo")}
               verticalAspectFactor={1.5}
             />
@@ -334,7 +340,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
             <>
               {(blurredPreviewUrl || firstFile?.gif_file_url) ? (
                 <VerticalAspectImage
-                  src={blurredPreviewUrl ?? firstFile.gif_file_url ?? ""}
+                  src={blurredPreviewUrl ?? ensureAbsoluteUrl(firstFile.gif_file_url) ?? ""}
                   className="block w-full h-auto object-contain"
                   factor={1.5}
                 />
@@ -379,19 +385,44 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
             </>
           )}
         </div>
-        {canEditContent && (
-          <div className="mt-3 px-0">
-            <Link
-              href={`/${locale}/post/${contentId}/edit`}
-              className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-              aria-label={t("edit")}
-            >
-              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              {t("edit")}
-            </Link>
+        {(canEditContent || canDeleteContent) && (
+          <div className="mt-3 px-0 flex items-center gap-4">
+            {canEditContent && (
+              <Link
+                href={`/${locale}/post/${contentId}/edit`}
+                className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                aria-label={t("edit")}
+              >
+                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                {t("edit")}
+              </Link>
+            )}
+            {canDeleteContent && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!confirm(`${t("deleteConfirm")}\n${t("deleteConfirmMessage")}`)) return;
+                  setDeleting(true);
+                  try {
+                    await deleteContent(contentId);
+                    router.push(`/${locale}`);
+                  } catch {
+                    setDeleting(false);
+                  }
+                }}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-red-600 transition-colors disabled:opacity-50"
+                aria-label={t("delete")}
+              >
+                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {t("delete")}
+              </button>
+            )}
           </div>
         )}
       </article>

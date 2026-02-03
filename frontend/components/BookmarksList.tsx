@@ -161,6 +161,9 @@ export function BookmarksList() {
           item={{ ...item, bookmarked: true }}
           locale={locale}
           onBookmarkedChange={handleBookmarkedChange}
+          onDeleted={(deletedItem) => {
+            setItems((prev) => prev.filter((i) => i.id !== deletedItem.id));
+          }}
         />
       ))}
       <div

@@ -337,6 +337,27 @@ func (cc *ContentController) UpdateContent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Content updated successfully"})
 }
 
+// DeleteContent 删除内容（需 can_delete_content 权限，仅 admin）
+func (cc *ContentController) DeleteContent(c *gin.Context) {
+	var params contentIDUri
+	if err := c.ShouldBindUri(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid content ID"})
+		return
+	}
+	if err := cc.contentService.DeleteContent(params.ID); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Content not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete content", "details": err.Error()})
+		return
+	}
+	if middleware.GlobalCacheMiddleware != nil {
+		middleware.GlobalCacheMiddleware.InvalidateContentCache(params.ID)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Content deleted successfully"})
+}
+
 // ListContent 分页列出 feed 内容。支持按分类、按标签(tag)、或模糊搜索(q)。dark 分类由 RequireNSFWPermissionForDarkList 中间件校验。
 // ListFeedByTag 仅允许拥有 can_search_tags 权限的用户使用；搜索时无 can_view_nsfw 的用户只能搜 light 分类。
 func (cc *ContentController) ListContent(c *gin.Context) {
@@ -633,8 +654,8 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 
 // WatchProgressRequest 观看进度请求体
 type WatchProgressRequest struct {
-	WatchTimeSeconds  float64 `json:"watch_time_seconds" binding:"required,gte=0"`  // 本次观看时长（秒）
-	DurationSeconds   float64 `json:"duration_seconds"`                             // 视频总时长（秒），可选，用于计算完成率
+	WatchTimeSeconds float64 `json:"watch_time_seconds" binding:"required,gte=0"` // 本次观看时长（秒）
+	DurationSeconds  float64 `json:"duration_seconds"`                            // 视频总时长（秒），可选，用于计算完成率
 }
 
 // RecordWatchProgress 记录观看进度（视频流播放时由前端上报，用于更新 TotalWatchTime / AverageWatchTime / CompletionRate）

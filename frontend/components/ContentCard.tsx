@@ -2,6 +2,7 @@
 
 import {
   addBookmark,
+  deleteContent,
   fetchCurrentUser,
   getAccessToken,
   getApiBase,
@@ -10,6 +11,7 @@ import {
   removeBookmark,
   type ContentFeedItem,
 } from "@/lib/api";
+import { ensureAbsoluteUrl } from "@/lib/metadata";
 import { buildShareUrl } from "@/lib/viewing";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -40,9 +42,11 @@ type ContentCardProps = {
   onPurchased?: (item: ContentFeedItem) => void;
   /** Called when bookmark is toggled (e.g. to remove from bookmarks list when unbookmarked). */
   onBookmarkedChange?: (item: ContentFeedItem, bookmarked: boolean) => void;
+  /** Called after content is deleted (e.g. to remove from list). */
+  onDeleted?: (item: ContentFeedItem) => void;
 };
 
-export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: ContentCardProps) {
+export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onDeleted }: ContentCardProps) {
   const router = useRouter();
   const tFeed = useTranslations("feed");
   const tPost = useTranslations("postDetail");
@@ -51,9 +55,11 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
   const [purchasing, setPurchasing] = useState(false);
   const [bookmarked, setBookmarked] = useState(() => item.bookmarked ?? false);
   const [bookmarking, setBookmarking] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   // Avoid hydration mismatch: server has no localStorage so getAccessToken() is null; only use token after mount
   const [hasAuth, setHasAuth] = useState(false);
   const [canEditContent, setCanEditContent] = useState(false);
+  const [canDeleteContent, setCanDeleteContent] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
   const timeAgo = useMemo(() => formatTimestamp(item.created_at), [item.created_at]);
   const displayName = item.author_username || item.name;
@@ -64,7 +70,9 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
   }, []);
   useEffect(() => {
     fetchCurrentUser().then((user) => {
-      setCanEditContent((user?.permissions ?? []).includes("can_edit_content"));
+      const perms = user?.permissions ?? [];
+      setCanEditContent(perms.includes("can_edit_content"));
+      setCanDeleteContent(perms.includes("can_delete_content"));
     });
   }, []);
 
@@ -89,9 +97,15 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
     [item, locale, onPurchased, purchasing, router]
   );
 
-  // Fetch preview from API for both purchased (real GIF) and not purchased (blurred) so image always loads
+  // 列表已带 preview_gif_base64 时直接用 data URL，否则再请求 /preview
+  const inlinePreviewDataUrl =
+    item.preview_gif_base64 != null && item.preview_gif_base64 !== ""
+      ? `data:image/gif;base64,${item.preview_gif_base64}`
+      : null;
+
+  // Fetch preview from API only when list did not include inline blurred GIF (purchased or fallback)
   useEffect(() => {
-    if (!item.first_file_id) return;
+    if (inlinePreviewDataUrl != null || !item.first_file_id) return;
     const base = getApiBase();
     const token = getAccessToken();
     const url = `${base}/content/files/${item.first_file_id}/preview`;
@@ -106,7 +120,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
         blobUrlRef.current = objectUrl;
         setBlurredPreviewUrl(objectUrl);
       })
-      .catch(() => { });
+      .catch(() => {});
     return () => {
       cancelled = true;
       if (blobUrlRef.current) {
@@ -115,14 +129,15 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
       }
       setBlurredPreviewUrl(null);
     };
-  }, [item.purchased, item.first_file_id]);
+  }, [inlinePreviewDataUrl, item.first_file_id]);
 
   // Sync bookmarked from server when item.bookmarked is present
   useEffect(() => {
     if (item.bookmarked !== undefined) setBookmarked(item.bookmarked);
   }, [item.bookmarked]);
 
-  const previewSrc = blurredPreviewUrl ?? item.preview_gif_url;
+  const previewSrc =
+    inlinePreviewDataUrl ?? blurredPreviewUrl ?? ensureAbsoluteUrl(item.preview_gif_url);
 
   return (
     <article className="block border-b border-[var(--border)] transition-colors hover:bg-[var(--hover)]">
@@ -325,20 +340,47 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange }: C
             </div>
           )}
         </div>
-        {canEditContent && (
-          <div className="mt-2 w-full px-1 self-start">
-            <Link
-              href={`/${locale}/post/${item.id}/edit`}
-              onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-              aria-label={tPost("edit")}
-            >
-              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              {tPost("edit")}
-            </Link>
+        {(canEditContent || canDeleteContent) && (
+          <div className="mt-2 w-full px-1 self-start flex items-center gap-3">
+            {canEditContent && (
+              <Link
+                href={`/${locale}/post/${item.id}/edit`}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                aria-label={tPost("edit")}
+              >
+                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                {tPost("edit")}
+              </Link>
+            )}
+            {canDeleteContent && (
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!confirm(`${tPost("deleteConfirm")}\n${tPost("deleteConfirmMessage")}`)) return;
+                  setDeleting(true);
+                  try {
+                    await deleteContent(item.id);
+                    onDeleted?.(item);
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-red-600 transition-colors disabled:opacity-50"
+                aria-label={tPost("delete")}
+              >
+                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {tPost("delete")}
+              </button>
+            )}
           </div>
         )}
       </div>

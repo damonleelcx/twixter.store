@@ -367,6 +367,8 @@ export type ContentFeedItem = {
   category: string;
   price: number;
   preview_gif_url: string;
+  /** 列表预取的模糊 GIF（base64），有则直接用作 data URL，无需请求 /preview */
+  preview_gif_base64?: string;
   first_file_id: number;
   purchased: boolean;
   bookmarked?: boolean;
@@ -511,6 +513,14 @@ export async function updateContent(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || data?.details || "Failed to update content");
+}
+
+/** Delete content (requires can_delete_content, admin only). */
+export async function deleteContent(contentId: number): Promise<void> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/content/${contentId}`, { method: "DELETE" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || data?.details || "Failed to delete content");
 }
 
 /** Read access token from cookie string (for server: pass request cookies). */
