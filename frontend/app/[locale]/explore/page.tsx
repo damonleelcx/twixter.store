@@ -2,21 +2,12 @@ import { ExploreContent } from "@/components/ExploreContent";
 import { LeftSidebar } from "@/components/LeftSidebar";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
+import { getBaseUrlForMetadata } from "@/lib/metadata";
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 import { Suspense } from "react";
 
 const SITE_NAME = "Twixter";
-
-function getBaseUrl(): string {
-  if (typeof process.env.NEXT_PUBLIC_APP_URL === "string" && process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  }
-  if (typeof process.env.VERCEL_URL === "string" && process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  return "https://twixter.store";
-}
 
 type Props = {
   params: Promise<{ locale: string }>;
@@ -28,7 +19,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const meta = messages.meta as { exploreTitle: string; exploreDescription: string };
   const title = meta.exploreTitle ?? `Explore | ${SITE_NAME}`;
   const description = meta.exploreDescription ?? "Discover and search content on Twixter";
-  const canonicalUrl = `${getBaseUrl()}/${locale}/explore`;
+  const canonicalUrl = `${getBaseUrlForMetadata()}/${locale}/explore`;
 
   return {
     title,

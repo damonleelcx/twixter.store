@@ -2,20 +2,11 @@ import { LeftSidebar } from "@/components/LeftSidebar";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import { TagPageContent } from "@/components/TagPageContent";
+import { getBaseUrlForMetadata } from "@/lib/metadata";
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 
 const SITE_NAME = "Twixter";
-
-function getBaseUrl(): string {
-  if (typeof process.env.NEXT_PUBLIC_APP_URL === "string" && process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  }
-  if (typeof process.env.VERCEL_URL === "string" && process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  return "https://twixter.store";
-}
 
 type Props = {
   params: Promise<{ locale: string; tag: string }>;
@@ -30,7 +21,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description = tag
     ? (meta.tagDescription ?? `Browse content with tag ${tag} on ${SITE_NAME}`).replace(/\{tag\}/g, tag)
     : "Twixter";
-  const canonicalUrl = tagEncoded ? `${getBaseUrl()}/${locale}/tag/${tagEncoded}` : undefined;
+  const canonicalUrl = tagEncoded ? `${getBaseUrlForMetadata()}/${locale}/tag/${tagEncoded}` : undefined;
 
   return {
     title,

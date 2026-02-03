@@ -4,6 +4,7 @@ import { PostContent } from "@/components/PostContent";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import { SaveViewingFromUrl } from "@/components/SaveViewingFromUrl";
 import { AUTH_TOKEN_COOKIE, getContentByIdServer } from "@/lib/api";
+import { getBaseUrlForMetadata, isSecureUrlForMeta } from "@/lib/metadata";
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 import { cookies } from "next/headers";
@@ -11,16 +12,6 @@ import { notFound } from "next/navigation";
 
 const SITE_NAME = "Twixter";
 const DEFAULT_DESCRIPTION = "View content on Twixter";
-
-function getBaseUrl(): string {
-  if (typeof process.env.NEXT_PUBLIC_APP_URL === "string" && process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  }
-  if (typeof process.env.VERCEL_URL === "string" && process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  return "https://twixter.store";
-}
 
 type Props = {
   params: Promise<{ locale: string; id: string }>;
@@ -50,10 +41,11 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
     (typeof content.description === "string" && content.description.trim()) ||
     (content.author_username ? `Content by @${content.author_username} on ${SITE_NAME}` : DEFAULT_DESCRIPTION);
   const descTruncated = description.length > 160 ? description.slice(0, 157) + "..." : description;
-  const canonicalUrl = `${getBaseUrl()}/${locale}/post/${id}`;
-  const ogImage =
+  const canonicalUrl = `${getBaseUrlForMetadata()}/${locale}/post/${id}`;
+  const rawOgImage =
     data.files?.[0]?.gif_file_url ||
     (data.files?.[0] as { original_file_url?: string } | undefined)?.original_file_url;
+  const ogImage = isSecureUrlForMeta(rawOgImage) ? rawOgImage : undefined;
   const keywords =
     Array.isArray(content.tags) && content.tags.length > 0
       ? content.tags.join(", ")
