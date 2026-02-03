@@ -756,11 +756,16 @@ cd ..
 ```
 
 **Rocky Linux 8 / k3s：从 `.env` 加载变量再构建**  
-在 Rocky 8 上若使用 `frontend/k8s/.env` 存放 Stripe/PayPal 等 key，先加载再构建（与 Minikube 小节中的 bash 方式相同）：
+在 Rocky 8 上若使用 `frontend/k8s/.env` 存放 Stripe/PayPal 等 key，先加载再构建（与 Minikube 小节中的 bash 方式相同）。
+
+**前置条件（避免出现 “Stripe is not configured”）**  
+1. 必须在 **bash 或 Git Bash** 下执行下面命令（Windows 的 CMD 不支持 `set -a` 与 `. ./k8s/.env`，变量不会被加载）。  
+2. 在 `frontend/k8s/.env` 中**必须**有一行：`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx` 或 `pk_test_xxx`，**等号两边不要有空格**，且不要用引号包住整行。  
+3. 构建前可在同一 shell 里执行 `echo "STRIPE_KEY length: ${#NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}"` 确认已加载（若为 0 说明未加载，需检查 .env 路径与格式）。
 
 ```bash
 cd frontend
-# 加载 k8s/.env，使 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 等传入下面的 docker build
+# 加载 k8s/.env，使 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY 等传入下面的 docker build（仅 bash/Git Bash）
 [ -f k8s/.env ] && set -a && . ./k8s/.env && set +a
 docker build -t damonleelcx/twixter.store-frontend:latest \
   --build-arg NEXT_PUBLIC_API_URL="https://api.twixter.store" \
