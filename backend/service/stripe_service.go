@@ -4,6 +4,7 @@ import (
 	"backend/entity"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -70,6 +71,17 @@ func NewStripeService() (StripeService, error) {
 
 	// 设置 Stripe API Key
 	stripe.Key = stripeKey
+
+	// 若设置了 HTTP_PROXY/HTTPS_PROXY，使用自定义 HTTP 客户端以便出网走代理（解决集群内 "no route to host" 等无法直连 api.stripe.com 的情况）
+	if os.Getenv("HTTPS_PROXY") != "" || os.Getenv("HTTP_PROXY") != "" {
+		transport := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		}
+		stripe.SetHTTPClient(&http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		})
+	}
 
 	// 从环境变量获取 Webhook Secret（可选）
 	webhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")

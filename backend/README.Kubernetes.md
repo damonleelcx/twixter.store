@@ -227,6 +227,264 @@ sudo firewall-cmd --add-port=5432/tcp
 sudo iptables -I INPUT -p tcp -s 10.42.0.0/16 --dport 5432 -j ACCEPT
 ```
 
+## 故障排查：Stripe API "no route to host"
+
+若出现类似错误：
+
+```text
+Post "https://api.stripe.com/v1/checkout/sessions": dial tcp 34.x.x.x:443: connect: no route to host
+```
+
+说明从 **k3s 节点或 Pod** 无法访问 Stripe API（防火墙或网络未放行出站 443）。按下面顺序排查。
+
+### 1. 先确认是节点还是 Pod 无路由
+
+在 **k3s 节点** 上执行：
+
+```bash
+nc -zv api.stripe.com 443
+```
+
+再在 **Pod 内**（与 backend 同网络）执行：
+
+```bash
+kubectl run -it --rm debug --image=busybox --restart=Never -- sh -c "nc -zv api.stripe.com 443 || true"
+```
+
+- 若**节点上就失败**：说明节点本身出网 443 被拦（防火墙/安全组/无默认网关等），需在节点或上游防火墙上放行出站 443，或改用代理（见下）。
+- 若**节点成功、Pod 失败**：多为 Pod 出网时源 IP 是 10.42.x.x，对端或中间设备未回包到该网段；可尝试在节点上对 Stripe 出口做 MASQUERADE（思路同数据库「节点能连、Pod 不能连」），或让 Pod 经代理出网。
+
+### 方式 A：从网络侧解决——放行出站 443、检查路由/网关
+
+若上面在节点或 Pod 内 `nc -zv api.stripe.com 443` 失败，按下面顺序在**网络侧**排查并修复。
+
+#### 1. 检查 k3s 节点是否有默认网关、能否出网
+
+在 **k3s 节点** 上执行：
+
+```bash
+# 是否有默认路由
+ip route show default
+
+# 能否 ping 通外网（若 ping 被禁，可跳过）
+ping -c 2 8.8.8.8
+
+# 本机出口公网 IP（若为空说明可能没出网或 NAT 异常）
+curl -s --connect-timeout 3 ifconfig.me || true
+```
+
+- **没有 default 或下一跳不可达**：在节点或上游路由器上配好默认网关（如 `ip route add default via <网关IP>`），或检查网线/ DHCP。
+- **有 default 但 ping/curl 不通**：多半是上游防火墙或运营商未放行出站，需在**上游设备**放行（见下）。
+
+#### 2. 在 k3s 节点上放行出站 443（本机防火墙）
+
+多数发行版**默认允许本机出站**，若你曾改过规则，需确保未拦截 443。
+
+**firewalld（Rocky/RHEL/CentOS/Fedora）：**
+
+```bash
+# 查看默认区域（出站默认允许，一般无需额外规则）
+sudo firewall-cmd --list-all
+```
+
+默认策略下**出站（output）是允许的**，通常不需要为 443 单独加规则。若你曾自定义过 `target: DROP` 或出站策略，再在对应区域放行出站 443（具体语法视版本而定，可查 `firewall-cmd --permanent --add-rich-rule --help`）。
+
+**iptables：**
+
+```bash
+# 查看 OUTPUT 链是否 DROP 了 443
+sudo iptables -L OUTPUT -n -v
+
+# 若需放行出站 443（按你现有规则插入）
+sudo iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT
+```
+
+#### 3. 上游防火墙 / 路由器
+
+若 k3s 节点在**内网**（如 192.168.x.x），出口经过**路由器或公司防火墙**：
+
+- 在路由器/防火墙上允许 **k3s 节点 IP**（或整个内网网段）**出站访问 443**。
+- 若使用 NAT，确保有**出站 NAT**，且没有「仅允许部分目的端口」的策略把 443 排除。
+
+#### 4. 云上安全组 / ACL
+
+若 k3s 跑在**云主机**（AWS / 阿里云 / GCP 等）：
+
+- 在对应实例的**安全组 / 网络 ACL** 中，放行**出站（Egress）**：协议 TCP，目的端口 **443**，目的地址 `0.0.0.0/0` 或至少允许访问公网。
+
+#### 5. 再次在节点与 Pod 内测试
+
+```bash
+# 节点上
+nc -zv api.stripe.com 443
+
+# Pod 内
+kubectl run -it --rm debug --image=busybox --restart=Never -- sh -c "nc -zv api.stripe.com 443 || true"
+```
+
+若节点上仍报 **no route to host**：通常是**没有到目标网段的路由**（缺 default 或上游未回包），重点检查 1 和 3。  
+若**节点成功、Pod 失败**：多为 Pod 出网未做 NAT（上游不认 10.42.x.x 源 IP），按下面「节点能连、Pod 不能连（Stripe）」处理。
+
+#### 6. 节点能连、Pod 不能连（Stripe）
+
+节点上 `nc -zv api.stripe.com 443` 成功，但 Pod 内同样命令报 **no route to host**，说明从 Pod 出去的包源 IP 是 10.42.x.x，上游或对端未回包到该网段。需在 k3s 节点上对 **Pod 出网** 做 MASQUERADE，使外网看到的是节点 IP。
+
+**推荐：对「来自 Pod 网段、目的非集群」的流量统一做 MASQUERADE**（k3s 默认 Pod 网段为 10.42.0.0/16）：
+
+```bash
+# 在 k3s 节点上执行（持久化需视系统而定，见下）
+sudo iptables -t nat -A POSTROUTING -s 10.42.0.0/16 ! -d 10.42.0.0/16 -j MASQUERADE
+```
+
+然后再次在 Pod 内测试：
+
+```bash
+kubectl run -it --rm debug --image=busybox --restart=Never -- sh -c "nc -zv api.stripe.com 443 || true"
+```
+
+若成功，重启 Backend：`kubectl rollout restart deployment/twixter-backend`。
+
+**持久化**：上述 `iptables` 规则重启后可能丢失。持久化方式之一（Rocky/RHEL）：
+
+```bash
+# 安装 iptables-services（若未装），并保存当前规则
+sudo yum install -y iptables-services
+sudo iptables-save | sudo tee /etc/sysconfig/iptables
+sudo systemctl enable iptables
+```
+
+或使用 firewalld 的 direct 规则（需在 MASQUERADE 生效后执行）：
+
+```bash
+sudo firewall-cmd --permanent --direct --add-rule ipv4 nat POSTROUTING 0 -s 10.42.0.0/16 ! -d 10.42.0.0/16 -j MASQUERADE
+sudo firewall-cmd --reload
+```
+
+**若 MASQUERADE 后 Pod 仍报 no route to host**：可能是 k3s 与 firewalld/iptables 规则顺序、或节点未对 Pod 流量做转发。可先做下面诊断，再考虑用「方式 B：代理」兜底。
+
+1. **确认节点已开启 IP 转发**：`cat /proc/sys/net/ipv4/ip_forward` 应为 `1`。若为 0：`echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward`，并持久化（如 `net.ipv4.ip_forward=1` 写入 `/etc/sysctl.d/99-forward.conf`）。
+2. **看 NAT 规则是否生效**：`sudo iptables -t nat -L POSTROUTING -n -v --line-numbers`，确认含 `10.42.0.0/16` 的 MASQUERADE 规则存在且有包计数（若有）。
+3. **试 firewalld 的 masquerade**（部分环境以 firewalld 为主）：  
+   `sudo firewall-cmd --permanent --add-masquerade`，`sudo firewall-cmd --reload`，再在 Pod 内测 `nc -zv api.stripe.com 443`。
+4. **兜底：在节点本机跑 HTTP 代理**（节点能连 Stripe，Pod 连节点即可）：在 k3s **节点**上装并启动 TinyProxy（监听 0.0.0.0:8888），放行 Pod 网段 `10.42.0.0/16`；Backend 的 ConfigMap/Secret 里设 `HTTPS_PROXY=http://<节点IP>:8888`（如 `http://208.122.213.192:8888`）。Pod 访问的是节点 IP，不经过出网 NAT，即可绕过「Pod 出网 no route」问题。详见下方「方式 B」与「在节点上跑代理（Pod 出网 NAT 仍不通时）」。
+5. **持久化**：iptables 规则持久化见上。
+
+### 方式 B：通过 HTTP 代理出网（推荐：节点无法直连外网时）
+
+若集群只能经 HTTP/HTTPS 代理访问外网，让 Backend 通过代理访问 Stripe 即可。
+
+1. **设置代理环境变量**（二选一）：
+   - **ConfigMap**：编辑 `backend/k8s/configmap.yaml`，将 `HTTPS_PROXY` / `HTTP_PROXY` 改为你的代理地址，例如：
+     ```yaml
+     HTTPS_PROXY: "http://your-proxy-host:3128"
+     HTTP_PROXY: "http://your-proxy-host:3128"
+     ```
+   - **Secret**（或 .env）：在 `backend/k8s/secret.yaml` 的 `stringData` 中增加（若用 Kustomize 从 `.env` 生成，则在 `backend/k8s/.env` 中增加）：
+     ```yaml
+     HTTPS_PROXY: "http://your-proxy-host:3128"
+     ```
+2. **确保 Pod 能访问代理**：在 Pod 内测试 `nc -zv your-proxy-host 3128`，若不通需先解决到代理的网络或防火墙。
+3. **应用并重启**：
+   ```bash
+   kubectl apply -f backend/k8s/configmap.yaml
+   # 若改的是 secret，则 apply secret 或 kubectl apply -k backend/k8s/
+   kubectl rollout restart deployment/twixter-backend -n default
+   ```
+
+Backend 启动 Stripe 服务时会读取 `HTTPS_PROXY`/`HTTP_PROXY`，Stripe 请求会经代理发出，从而避免直连时的 "no route to host"。
+
+### 什么是「代理主机」？如何搭建？
+
+**代理主机（proxy host）** 是一台提供 **HTTP/HTTPS 代理** 的服务器：你的 Backend 不直接连 Stripe，而是把请求发给代理，由代理代替你去连 `api.stripe.com`，再把响应回给你。这样只要「Backend → 代理」和「代理 → 互联网」两条路通，Stripe 就能用。
+
+- **何时需要**：k3s 节点或 Pod 无法直连外网（防火墙/无路由）时，让流量经一台「能上网」的机器转发。
+- **何时不需要**：若能放行节点/Pod 的出站 443（方式 A），就不必搞代理。
+
+**常见获取方式：**
+
+1. **公司/学校已有代理**  
+   若你在内网，问运维是否提供 HTTP 代理（地址如 `proxy.company.com:3128`）。有的话把该地址填到 `HTTPS_PROXY` 即可，且需保证 k3s 节点能访问该地址。
+
+2. **自己搭一台（推荐：有一台能上网的 Linux 时）**  
+   在一台**能访问互联网**的机器上（可以是你的笔记本、家里另一台电脑、或一台 VPS）装一个轻量 HTTP 代理，让 k3s 节点能访问这台机器的 IP 和端口。
+
+   **用 TinyProxy（简单）：**
+
+   ```bash
+   # 以 Rocky/RHEL/CentOS 为例
+   sudo dnf install -y tinyproxy
+   # 允许来自 k3s 节点 IP 的请求（或 0.0.0.0 仅内网测试）
+   echo 'Allow 10.42.0.0/16' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
+   echo 'Allow 192.168.0.0/16' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
+   sudo systemctl enable --now tinyproxy
+   ```
+
+   默认监听 8888。若这台机器 IP 是 `192.168.1.100`，则在 Backend 的 ConfigMap/Secret 里设：
+
+   ```yaml
+   HTTPS_PROXY: "http://192.168.1.100:8888"
+   HTTP_PROXY: "http://192.168.1.100:8888"
+   ```
+
+   确保 k3s 节点能访问 `192.168.1.100:8888`（防火墙放行 8888）。
+
+   **用 Squid（功能更多）：**
+
+   ```bash
+   sudo dnf install -y squid
+   # 编辑 /etc/squid/squid.conf，允许你的内网网段
+   # acl local_net src 10.42.0.0/16
+   # acl local_net src 192.168.0.0/16
+   # http_access allow local_net
+   sudo systemctl enable --now squid
+   ```
+
+   默认端口 3128，对应 `HTTPS_PROXY: "http://<该机IP>:3128"`。
+
+3. **没有可用的代理时**  
+   若既没有现成代理，也没有能上网的机器可装代理，就只能从网络侧解决：在 k3s 节点或上游路由器/防火墙上放行出站 443（方式 A），或检查默认网关/路由是否导致「no route to host」。
+
+**小结**：`your-proxy-host` = 运行代理服务的那台机器的 **IP 或域名**，`3128`/`8888` 等 = **代理监听端口**。Backend 通过 `HTTPS_PROXY` 把 Stripe 的请求发到该地址，由代理代为访问互联网。
+
+**在节点上跑代理（Pod 出网 NAT 仍不通时）**
+
+当「节点能连 Stripe、Pod 不能」且 MASQUERADE / firewalld masquerade 仍无效时，可在 **k3s 节点本机** 跑一个 HTTP 代理：节点能直连 Stripe，Pod 只需连到节点 IP，不经过出网 NAT，即可用。
+
+1. **在 k3s 节点上**（如 msd6200）安装并配置 TinyProxy：
+
+   ```bash
+   sudo dnf install -y tinyproxy
+   # 只允许 Pod 网段（避免对外暴露）
+   echo 'Allow 10.42.0.0/16' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
+   echo 'Allow 127.0.0.1' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
+   # 确保监听所有接口（Pod 通过节点 IP 连过来）
+   grep -q '^Listen 0.0.0.0' /etc/tinyproxy/tinyproxy.conf || echo 'Listen 0.0.0.0' | sudo tee -a /etc/tinyproxy/tinyproxy.conf
+   sudo systemctl enable --now tinyproxy
+   ```
+
+2. **放行节点本机 8888 入站**（firewalld）：
+
+   ```bash
+   sudo firewall-cmd --permanent --add-port=8888/tcp
+   sudo firewall-cmd --reload
+   ```
+
+3. **Backend 使用节点 IP 作为代理**：把 `HTTPS_PROXY` / `HTTP_PROXY` 设为节点 IP（如 `208.122.213.192`）：
+
+   - ConfigMap：`backend/k8s/configmap.yaml` 里设 `HTTPS_PROXY: "http://208.122.213.192:8888"`、`HTTP_PROXY: "http://208.122.213.192:8888"`（IP 换成你的节点 IP）。
+   - 或 Secret / `.env` 里设同名变量。
+
+4. **应用并重启**：
+
+   ```bash
+   kubectl apply -f backend/k8s/configmap.yaml
+   kubectl rollout restart deployment/twixter-backend
+   ```
+
+5. **验证**：在 Pod 内应能连节点 8888：`kubectl run -it --rm debug --image=busybox --restart=Never -- sh -c "nc -zv 208.122.213.192 8888 || true"`（IP 换成你的节点 IP）。成功后 Stripe 请求会经节点上的 TinyProxy 转发。
+
+---
+
 **PostgreSQL listen_addresses 与 pg_hba.conf（Rocky Linux 8）**
 
 在 **安装 PostgreSQL 的那台 Rocky Linux 8** 上操作。
