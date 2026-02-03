@@ -4,17 +4,17 @@ import { LeftSidebar } from "@/components/LeftSidebar";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebar } from "@/components/RightSidebar";
 import {
-  capturePayPalOrder,
-  createCreditsCheckout,
-  createPayPalCreditsOrder,
-  fetchCurrentUser,
-  type CurrentUser,
+    capturePayPalOrder,
+    createCreditsCheckout,
+    createPayPalCreditsOrder,
+    fetchCurrentUser,
+    type CurrentUser,
 } from "@/lib/api";
 import { PayPalButtons, PayPalScriptProvider } from "@paypal/react-paypal-js";
 import {
-  CheckoutProvider,
-  PaymentElement,
-  useCheckout,
+    CheckoutProvider,
+    PaymentElement,
+    useCheckout,
 } from "@stripe/react-stripe-js/checkout";
 import { loadStripe } from "@stripe/stripe-js";
 import { useTranslations } from "next-intl";

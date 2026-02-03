@@ -66,6 +66,19 @@ func InitRepositories(db *gorm.DB) *Repositories {
 func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 	services := &Services{}
 
+	// 初始化邮件服务（可选）；未配置时用占位实现，密码重置仅打印 token
+	var emailService service.EmailService
+	emailReal, err := service.NewEmailService()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize email service: %v. Password reset emails will not be sent.", err)
+		emailService = service.NoopEmailService()
+	} else if emailReal == nil {
+		emailService = service.NoopEmailService()
+	} else {
+		emailService = emailReal
+		log.Println("Email service (SMTP) initialized for password reset.")
+	}
+
 	// 初始化认证服务（必需）
 	permissionRepo := repository.NewPermissionRepository(db)
 	services.AuthService = service.NewAuthService(
@@ -76,6 +89,7 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 		repos.PurchaseRepo,
 		repos.UserPermissionRepo,
 		permissionRepo,
+		emailService,
 	)
 
 	// 初始化 S3 服务（可选）；失败时用占位实现，内容只读路由仍可用
