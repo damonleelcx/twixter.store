@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -30,9 +31,10 @@ func InitDB() (*gorm.DB, error) {
 	port := getEnv("DB_PORT", "5432")
 	sslmode := getEnv("DB_SSLMODE", "disable")
 
-	// 构建 PostgreSQL 连接字符串
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
-		host, user, password, dbname, port, sslmode)
+	// 构建 PostgreSQL 连接字符串；connect_timeout 避免拨号长时间挂起（K3s/云环境 connection refused 时快速失败便于重试）
+	connectTimeout := getEnv("DB_CONNECT_TIMEOUT", "5")
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s connect_timeout=%s",
+		host, user, password, dbname, port, sslmode, connectTimeout)
 
 	maxRetries := 10
 	retryDelay := 2 * time.Second
@@ -52,10 +54,28 @@ func InitDB() (*gorm.DB, error) {
 				err = pingErr
 			} else {
 				// 配置连接池，避免长时间空闲连接被服务端/防火墙关闭后仍被复用导致 connection refused
-				sqlDB.SetMaxIdleConns(5)
-				sqlDB.SetMaxOpenConns(25)
+				maxIdle := 5
+				maxOpen := 25
+				if v := os.Getenv("DB_MAX_IDLE_CONNS"); v != "" {
+					if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+						maxIdle = n
+					}
+				}
+				if v := os.Getenv("DB_MAX_OPEN_CONNS"); v != "" {
+					if n, err := strconv.Atoi(v); err == nil && n > 0 {
+						maxOpen = n
+					}
+				}
+				sqlDB.SetMaxIdleConns(maxIdle)
+				sqlDB.SetMaxOpenConns(maxOpen)
 				sqlDB.SetConnMaxLifetime(5 * time.Minute) // 定期回收连接，减少使用已断开的连接
-				sqlDB.SetConnMaxIdleTime(1 * time.Minute) // 空闲超过 1 分钟即关闭，避免 K3s/云环境防火墙关闭空闲连接后复用导致 dial tcp: connection refused
+				connMaxIdleTime := 30 * time.Second       // 默认 30s：早于常见防火墙空闲超时，避免复用被关闭的连接导致 fetch 时 connection refused
+				if v := os.Getenv("DB_CONN_MAX_IDLE_TIME"); v != "" {
+					if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+						connMaxIdleTime = time.Duration(sec) * time.Second
+					}
+				}
+				sqlDB.SetConnMaxIdleTime(connMaxIdleTime)
 				log.Println("Successfully connected to PostgreSQL database")
 				return database, nil
 			}
