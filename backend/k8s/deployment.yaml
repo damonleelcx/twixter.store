@@ -31,11 +31,6 @@ spec:
                 name: twixter-backend-secret
             - configMapRef:
                 name: twixter-backend-config
-          env:
-            - name: DB_HOST
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
           resources:
             requests:
               memory: "128Mi"

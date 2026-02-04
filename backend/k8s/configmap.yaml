@@ -14,3 +14,5 @@ data:
   # k3s 等无法直连 api.stripe.com 时，填写代理地址（如 http://proxy:3128），Backend 会经代理访问 Stripe
   HTTPS_PROXY: "http://10.42.0.1:8888"
   HTTP_PROXY: "http://10.42.0.1:8888"
+  # Postgres 与 K8s 同机且 status.hostIP 为公网 IP 时，用节点在 Pod 网段的 IP 避免本机回环；k3s 单节点多为 10.42.0.1。若 DB 在远程，删掉此行改由 Secret 提供 DB_HOST。
+  DB_HOST: "10.42.0.1"

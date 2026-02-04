@@ -1,0 +1,3 @@
+# 已弃用：当 status.hostIP 为公网 IP（如 208.x.x.x）时，用 hostIP 无法避免本机回环。
+# 请改用 ConfigMap 设置 DB_HOST=10.42.0.1（节点在 Pod 网段的 IP），见 README.env.md「数据库在本机」。
+# 此文件保留仅为兼容旧说明，不再用于 patch。
