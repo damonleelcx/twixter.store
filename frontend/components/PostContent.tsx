@@ -5,7 +5,6 @@ import {
   deleteContent,
   fetchCurrentUser,
   getAccessToken,
-  getApiBase,
   getContentById,
   isInsufficientCreditsError,
   purchaseContent,
@@ -17,7 +16,7 @@ import { buildShareUrl } from "@/lib/viewing";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { HlsPlayer } from "./HlsPlayer";
 import { VerticalAspectImage } from "./VerticalAspectImage";
 
@@ -59,11 +58,9 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
   const [justPurchased, setJustPurchased] = useState(false);
   const [bookmarked, setBookmarked] = useState(() => initialData?.content?.bookmarked ?? false);
   const [bookmarking, setBookmarking] = useState(false);
-  const [blurredPreviewUrl, setBlurredPreviewUrl] = useState<string | null>(null);
   const [canEditContent, setCanEditContent] = useState(false);
   const [canDeleteContent, setCanDeleteContent] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const blobUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetchCurrentUser().then((user) => {
@@ -108,35 +105,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
     if (data?.content?.bookmarked !== undefined) setBookmarked(data.content.bookmarked);
   }, [data?.content?.bookmarked]);
 
-  // Fetch preview from API for both purchased (real GIF) and not purchased (blurred) so poster/preview always loads
-  useEffect(() => {
-    if (!data?.files?.[0]) return;
-    const fileId = data.files[0].id;
-    const base = getApiBase();
-    const token = getAccessToken();
-    const url = `${base}/content/files/${fileId}/preview`;
-    const headers: HeadersInit = {};
-    if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-    let cancelled = false;
-    fetch(url, { headers })
-      .then((r) => (r.ok ? r.blob() : null))
-      .then((blob) => {
-        if (cancelled || !blob) return;
-        const objectUrl = URL.createObjectURL(blob);
-        blobUrlRef.current = objectUrl;
-        setBlurredPreviewUrl(objectUrl);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-      }
-      setBlurredPreviewUrl(null);
-    };
-  }, [data?.content?.purchased, justPurchased, data?.files]);
-
+  // 后端按权限返回 gif_file_url（已购买=正常 GIF，未购买=模糊 GIF），直接使用
   const handlePurchase = useCallback(async () => {
     if (!getAccessToken()) return;
     setPurchasing(true);
@@ -332,15 +301,15 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
               contentId={contentId}
               durationSeconds={firstFile.duration}
               className="block w-full h-auto object-contain"
-              poster={blurredPreviewUrl ?? ensureAbsoluteUrl(firstFile.gif_file_url) ?? undefined}
+              poster={ensureAbsoluteUrl(firstFile.gif_file_url) ?? undefined}
               playLabel={t("playVideo")}
               verticalAspectFactor={1.5}
             />
           ) : (
             <>
-              {(blurredPreviewUrl || firstFile?.gif_file_url) ? (
+              {firstFile?.gif_file_url ? (
                 <VerticalAspectImage
-                  src={blurredPreviewUrl ?? ensureAbsoluteUrl(firstFile.gif_file_url) ?? ""}
+                  src={ensureAbsoluteUrl(firstFile.gif_file_url) ?? firstFile.gif_file_url}
                   className="block w-full h-auto object-contain"
                   factor={1.5}
                 />

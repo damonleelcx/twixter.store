@@ -16,7 +16,7 @@ import { buildShareUrl } from "@/lib/viewing";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { HlsPlayer } from "./HlsPlayer";
 import { VerticalAspectImage } from "./VerticalAspectImage";
 
@@ -51,7 +51,6 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
   const tFeed = useTranslations("feed");
   const tPost = useTranslations("postDetail");
   const tAuth = useTranslations("auth");
-  const [blurredPreviewUrl, setBlurredPreviewUrl] = useState<string | null>(null);
   const [purchasing, setPurchasing] = useState(false);
   const [bookmarked, setBookmarked] = useState(() => item.bookmarked ?? false);
   const [bookmarking, setBookmarking] = useState(false);
@@ -60,7 +59,6 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
   const [hasAuth, setHasAuth] = useState(false);
   const [canEditContent, setCanEditContent] = useState(false);
   const [canDeleteContent, setCanDeleteContent] = useState(false);
-  const blobUrlRef = useRef<string | null>(null);
   const timeAgo = useMemo(() => formatTimestamp(item.created_at), [item.created_at]);
   const displayName = item.author_username || item.name;
   const avatarInitial = (displayName.charAt(0) || "?").toUpperCase();
@@ -97,47 +95,13 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
     [item, locale, onPurchased, purchasing, router]
   );
 
-  // 列表已带 preview_gif_base64 时直接用 data URL，否则再请求 /preview
-  const inlinePreviewDataUrl =
-    item.preview_gif_base64 != null && item.preview_gif_base64 !== ""
-      ? `data:image/gif;base64,${item.preview_gif_base64}`
-      : null;
-
-  // Fetch preview from API only when list did not include inline blurred GIF (purchased or fallback)
-  useEffect(() => {
-    if (inlinePreviewDataUrl != null || !item.first_file_id) return;
-    const base = getApiBase();
-    const token = getAccessToken();
-    const url = `${base}/content/files/${item.first_file_id}/preview`;
-    const headers: HeadersInit = {};
-    if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-    let cancelled = false;
-    fetch(url, { headers })
-      .then((r) => (r.ok ? r.blob() : null))
-      .then((blob) => {
-        if (cancelled || !blob) return;
-        const objectUrl = URL.createObjectURL(blob);
-        blobUrlRef.current = objectUrl;
-        setBlurredPreviewUrl(objectUrl);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-      }
-      setBlurredPreviewUrl(null);
-    };
-  }, [inlinePreviewDataUrl, item.first_file_id]);
+  // 后端按权限返回 preview_gif_url（已购买=正常 GIF，未购买=模糊 GIF），直接使用
+  const previewSrc = ensureAbsoluteUrl(item.preview_gif_url);
 
   // Sync bookmarked from server when item.bookmarked is present
   useEffect(() => {
     if (item.bookmarked !== undefined) setBookmarked(item.bookmarked);
   }, [item.bookmarked]);
-
-  const previewSrc =
-    inlinePreviewDataUrl ?? blurredPreviewUrl ?? ensureAbsoluteUrl(item.preview_gif_url);
 
   return (
     <article className="block border-b border-[var(--border)] transition-colors hover:bg-[var(--hover)]">

@@ -245,27 +245,32 @@ func (cc *ContentController) GetContent(c *gin.Context) {
 		return
 	}
 
+	purchased := false
+	bookmarked := false
+	if user, exists := middleware.GetUserFromContext(c); exists {
+		purchased, _ = cc.contentService.UserCanViewContent(user.ID, content.ID)
+		bookmarked, _ = cc.contentService.IsBookmarked(user.ID, content.ID)
+	}
+
+	// 按权限返回 gif_file_url：已购买为正常 GIF，未购买为模糊 GIF
 	fileResponses := make([]gin.H, 0, len(files))
 	for _, file := range files {
+		gifURL := file.GifFileURL
+		if !purchased && file.GifBlurFileURL != "" {
+			gifURL = file.GifBlurFileURL
+		}
 		fileResponses = append(fileResponses, gin.H{
 			"id":                  file.ID,
 			"file_name":           file.FileName,
 			"file_index":          file.FileIndex,
 			"original_file_url":   file.OriginalFileURL,
-			"gif_file_url":        file.GifFileURL,
+			"gif_file_url":        gifURL,
 			"transcoded_file_url": file.TranscodedFileURL,
 			"stage":               file.Stage,
 			"width":               file.Width,
 			"height":              file.Height,
 			"duration":            file.Duration,
 		})
-	}
-
-	purchased := false
-	bookmarked := false
-	if user, exists := middleware.GetUserFromContext(c); exists {
-		purchased, _ = cc.contentService.UserCanViewContent(user.ID, content.ID)
-		bookmarked, _ = cc.contentService.IsBookmarked(user.ID, content.ID)
 	}
 
 	authorUsername, authorAvatar := cc.contentService.GetAuthorForUserID(content.UploadedBy)
