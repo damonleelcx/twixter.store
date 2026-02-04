@@ -1,19 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_URL = (
-  process.env.BACKEND_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:8080"
-).replace(/\/+$/, "");
+function getBackendUrl(): string {
+  const raw =
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8080";
+  return raw.replace(/\/+$/, "");
+}
 
 /**
  * 运行时 API 代理：请求时读取 BACKEND_URL，避免 next.config rewrites 在构建时写死目标导致生产环境 ECONNREFUSED。
  * 更具体的路由（如 /api/content/videos/upload）会优先匹配，不会走此代理。
  */
 async function proxy(request: NextRequest, pathSegments: string[]) {
+  const backendUrl = getBackendUrl();
+  if (process.env.NODE_ENV === "production" && /^https?:\/\/localhost(:\d+)?(\/|$)/i.test(backendUrl)) {
+    return NextResponse.json(
+      {
+        error: "Backend not configured",
+        details: "Set BACKEND_URL in frontend ConfigMap (e.g. http://twixter-backend:8080) and ensure twixter-frontend-config is applied.",
+      },
+      { status: 502 }
+    );
+  }
   const path = pathSegments.join("/");
   const search = request.nextUrl.search;
-  const url = `${BACKEND_URL}/api/${path}${search}`;
+  const url = `${backendUrl}/api/${path}${search}`;
 
   const headers = new Headers();
   request.headers.forEach((value, key) => {
