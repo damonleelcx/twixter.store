@@ -837,7 +837,9 @@ cd ..
      -n default
    ```
 
-   若 Secret 已存在需更新：`kubectl delete secret regcred -n default` 再执行上面其一，然后 `kubectl rollout restart deployment/twixter-backend deployment/twixter-frontend`。
+   若 Secret 已存在需更新：`kubectl delete secret regcred -n default` 再执行上面其一，然后 
+   `kubectl rollout restart deployment/twixter-backend`
+   `kubectl rollout restart deployment/twixter-frontend`。
 
 3. **一次性部署**（在仓库根目录）：
 
