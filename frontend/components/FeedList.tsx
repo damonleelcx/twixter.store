@@ -28,6 +28,7 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
   const [error, setError] = useState<string | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
+  const initialMountDone = useRef(false);
 
   const category = activeTab === "forYou" ? "light" : "dark";
 
@@ -78,14 +79,20 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
     [category]
   );
 
-  // 切换 For you / Premium 时都重新拉取当前 tab 的列表
+  // 切换 For you / Premium 时都重新拉取当前 tab 的列表；首屏 "For you" 且已有 SSR 数据时跳过冗余请求
   useEffect(() => {
+    const isForYouWithInitial = activeTab === "forYou" && initialForYouFeed != null;
+    if (!initialMountDone.current && isForYouWithInitial) {
+      initialMountDone.current = true;
+      return;
+    }
+    initialMountDone.current = true;
     setItems([]);
     setCursor(0);
     setHasMore(true);
     setError(null);
     loadPage(0, false);
-  }, [activeTab, loadPage]);
+  }, [activeTab, loadPage, initialForYouFeed]);
 
   // After returning from post edit, refetch current tab so list shows updated content
   useEffect(() => {

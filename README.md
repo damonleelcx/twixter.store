@@ -781,6 +781,7 @@ cd ..
 - `"${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}"` 表示使用环境变量值，若未设置则为空；key 不要写进 README，放在 `frontend/k8s/.env` 即可。
 
 - `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_APP_URL` 必须使用 **https://api.twixter.store** 和 **https://www.twixter.store**，与 Ingress 及 DNS 一致。
+- **BACKEND_URL**：构建时传入供 `next.config` 的 rewrite 使用；**运行时**在 K3s/K8s 中必须通过 ConfigMap（如 `frontend/k8s/configmap.yaml`）注入 `BACKEND_URL=http://twixter-backend:8080`，否则 SSR（如帖子详情页）请求后端会拿不到该变量（最终镜像的 runner 阶段不含此 ENV），可能回退到同源或 localhost 导致 ECONNREFUSED。
 - 若镜像在 CI 或本机构建后推送到 Docker Hub，服务器上拉取同一镜像即可，无需在服务器上再构建。
 
 ### 步骤 7：构建后端镜像并部署
