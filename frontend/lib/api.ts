@@ -719,21 +719,14 @@ export async function fetchLibraryContent(
 
 /** Server-only: base URL for API (absolute). Use in server components / server actions. */
 /**
- * Server-only API base for fetch from Node (SSR). In K8s, set BACKEND_URL (e.g. http://twixter-backend:8080)
- * so the frontend pod can reach the backend; NEXT_PUBLIC_API_URL (e.g. api.twixter.local) is for the browser
- * and may not resolve inside the cluster.
- * When BACKEND_URL and NEXT_PUBLIC_API_URL are both unset (e.g. production without env), use NEXT_PUBLIC_APP_URL
- * so SSR fetches same-origin /api and Next.js rewrites proxy to the backend (avoids ECONNREFUSED on localhost).
+ * SSR 请求本机 Next 的 /api（127.0.0.1:PORT），由 app/api/[...path] 代理用 BACKEND_URL 转发到后端。
+ * - NEXT_PUBLIC_* 才会打进浏览器；BACKEND_URL 仅服务端用（API 路由、SSR），不会暴露给前端，Next 和 k3s 都支持。
+ * - 用本机地址保证请求一定走同进程的代理，代理里再读 BACKEND_URL（如 http://twixter-backend:8080）连真实后端。
  */
 export function getServerApiBase(): string {
   if (typeof window !== "undefined") return "";
-  const url =
-    process.env.BACKEND_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    (process.env.NEXT_PUBLIC_APP_URL ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "") : "") ||
-    "http://localhost:8080";
-  const base = url.replace(/\/$/, "");
-  return base.startsWith("http") ? `${base}/api` : `http://${base}/api`;
+  const port = process.env.PORT || "3000";
+  return `http://127.0.0.1:${port}/api`;
 }
 
 /** Server-only: fetch current user using token (e.g. from cookies().get(AUTH_TOKEN_COOKIE)?.value). Returns null if no token or API error. */
