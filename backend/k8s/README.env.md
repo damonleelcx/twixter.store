@@ -48,3 +48,87 @@ Kustomize 的 `secretGenerator` 读取的是 **本目录下的 `.env`**，即 **
    kubectl logs deployment/twixter-backend -f
    ```
    Pod 的启动时间应在你执行 `rollout restart` 之后，且不应再出现 `[::1]:6379` 或 `localhost:6379`。
+
+## 数据库在 k3s 节点本机（裸机 k3s）
+
+后端跑在 Pod 里时，Pod 内的 `localhost` 指向 Pod 自己，**不是**宿主机。若 Postgres 装在 **k3s 所在的那台机器** 上：
+
+- 建议用 **Downward API 把 `DB_HOST` 设为节点 IP**（`status.hostIP`），这样 Pod 连宿主机不会遇到 NAT/回环问题；做法见下方「数据库 `connection refused`」里的 **数据库在本机** 小节。
+- 宿主机上的 Postgres 须监听 5432：`listen_addresses = '*'` 或包含该节点 IP，不能只写 `localhost`，否则 Pod 连不上。
+- 若改用**托管 Postgres**（如 RDS），在 `deployment.yaml` 里不要加 `DB_HOST` 的 `fieldRef`，改由 Secret（即 `backend/k8s/.env`）提供 `DB_HOST`。
+
+## 数据库 `connection refused`（K3s 访问外部 Postgres）
+
+若后端日志出现 `dial tcp 208.x.x.x:5432: connect: connection refused`，说明 **TCP 层面无法连到目标地址**（未建连即被拒绝或中间设备 RST）。Postgres 已在主机上监听 `0.0.0.0:5432` 时，重点排查 **从 Pod 到主机的网络与防火墙**。
+
+### 重启后能连、一请求（如 fetch content）就 refused
+
+若 **重启后端后能连上 DB，但一发起业务请求（如获取内容）又报 connection refused**，常见原因：
+
+1. **空闲连接被防火墙/中间设备关闭后，连接池复用了已断开的连接**  
+   应用已把 **ConnMaxIdleTime 默认改为 30 秒**（早于常见防火墙空闲超时），减少复用死连接。若仍出现，可在 Secret/ConfigMap 里设 `DB_CONN_MAX_IDLE_TIME=20`（秒）进一步缩短，并重新部署。
+2. **Postgres 与 K8s 在同一台机，用公网 IP 连本机存在 NAT/回环**  
+   改用 **Downward API 的 `status.hostIP` 作为 `DB_HOST`**（见下方「数据库在本机」），避免第二路或后续连接被拒绝。
+
+### 从 Pod 内验证连通性
+
+在集群里起一个临时 Pod，用同一 `DB_HOST` 测试能否连到 5432：
+
+```bash
+# 用与后端相同的 namespace（如 default）
+kubectl run -it --rm debug-net --image=alpine --restart=Never -- sh
+# 在 Pod 内执行（把 208.122.213.192 换成你的 DB_HOST）：
+apk add --no-cache postgresql-client
+nc -zv 208.122.213.192 5432
+# 或直接试 psql：
+psql "host=208.122.213.192 port=5432 user=twixter_store_user dbname=twixter-store connect_timeout=5" -c "select 1"
+```
+
+- 若 Pod 内 `nc`/`psql` 也报 **connection refused**：问题在 **网络/防火墙**（见下），不是应用代码。
+- 若 Pod 内能连、仅后端连不上：再查后端环境变量（Secret 里的 `DB_HOST`/`DB_USER`/`DB_NAME` 等）和 pg_hba.conf 是否放行 Pod 网段。
+
+### 在 DB 主机（208.122.213.192）上必查项
+
+1. **防火墙放行 5432 入站（来源为 Pod/节点网段）**  
+   - **firewalld**：  
+     `sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="10.42.0.0/16" port port="5432" protocol="tcp" accept'`  
+     （k3s 默认 Pod 网段为 `10.42.0.0/16`；若不同请改成你的 Pod CIDR。）  
+     `sudo firewall-cmd --reload`  
+   - **iptables**：放行来自 Pod 网段的 5432：  
+     `sudo iptables -I INPUT -p tcp -s 10.42.0.0/16 --dport 5432 -j ACCEPT`  
+   - 云主机：在安全组/ACL 中放行 5432，来源为 K8s 节点 IP 或 Pod 出网使用的 CIDR。
+
+2. **PostgreSQL 监听**  
+   已确认 `listen_addresses = '*'` 且 `netstat -lnpt` 显示 `0.0.0.0:5432` 即可。
+
+3. **pg_hba.conf**  
+   在 TCP 能连上之后，若出现认证错误，再在 DB 主机上把 Pod 网段加入 `pg_hba.conf` 并 `pg_ctl reload`，例如：  
+   `host  all  all  10.42.0.0/16  scram-sha-256`
+
+### 数据库在本机（Postgres 与 K8s 在同一台机）
+
+若 Postgres 就装在 K8s 节点本机（如 `msd6200`），Pod 连「本机公网 IP」有时会因 **NAT/回环** 导致 connection refused。可改为用 **节点 IP（Downward API）** 作为 `DB_HOST`，让 Pod 直接连节点内网地址：
+
+1. 在 `deployment.yaml` 的 `containers[0]` 里，在 `envFrom` 之后增加一段 `env`（显式 `env` 会覆盖 Secret 里的同名变量）：
+
+```yaml
+          envFrom:
+            - secretRef:
+                name: twixter-backend-secret
+            - configMapRef:
+                name: twixter-backend-config
+          env:
+            - name: DB_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+```
+
+2. 从 `backend/k8s/.env` 中**删除或注释** `DB_HOST`，避免 Secret 覆盖上述 `DB_HOST`。  
+3. 本机防火墙仍需放行 5432，来源为 Pod CIDR（如 `10.42.0.0/16`）。  
+若改用**托管 Postgres**（如 RDS），删掉上面这段 `env`，并在 `.env` 里配置 `DB_HOST`。
+
+### 其他
+
+- **连接数**：后端默认每实例最多 25 个连接（可设 `DB_MAX_OPEN_CONNS=10` 等）。多副本时总连接数不要超过 Postgres `max_connections`。
+- **应用侧已做**：`/health` 重试、DSN `connect_timeout=5`、连接池 `ConnMaxLifetime`/`ConnMaxIdleTime`，减少断连复用导致的 connection refused。

@@ -71,7 +71,7 @@ func SetupRouter(
 		})
 	})
 
-	// 数据库连接测试端点（使用默认限流）
+	// 数据库连接测试端点（使用默认限流）；Ping 失败时重试数次，避免 K8s 因瞬时 connection refused 重启 Pod
 	router.GET("/health", middleware.RateLimitMiddleware(middleware.DefaultRateLimiter), func(c *gin.Context) {
 		sqlDB, err := db.DB()
 		if err != nil {
@@ -82,10 +82,22 @@ func SetupRouter(
 			return
 		}
 
-		if err := sqlDB.Ping(); err != nil {
+		const healthPingRetries = 3
+		const healthPingDelay = 1 * time.Second
+		var pingErr error
+		for attempt := 0; attempt < healthPingRetries; attempt++ {
+			pingErr = sqlDB.Ping()
+			if pingErr == nil {
+				break
+			}
+			if attempt < healthPingRetries-1 {
+				time.Sleep(healthPingDelay)
+			}
+		}
+		if pingErr != nil {
 			c.JSON(500, gin.H{
 				"status":  "error",
-				"message": "Database connection failed",
+				"message": "Database connection failed after retries",
 			})
 			return
 		}
