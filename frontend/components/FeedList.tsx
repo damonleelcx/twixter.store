@@ -1,7 +1,7 @@
 "use client";
 
 import type { ContentFeedItem, ContentFeedResponse } from "@/lib/api";
-import { fetchContentFeed, getAccessToken } from "@/lib/api";
+import { fetchContentFeed } from "@/lib/api";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContentCard } from "./ContentCard";
@@ -28,8 +28,6 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
   const [error, setError] = useState<string | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
-  const initialForYouRef = useRef(initialForYouFeed);
-  const hasRefetchedForYouWithAuth = useRef(false);
 
   const category = activeTab === "forYou" ? "light" : "dark";
 
@@ -80,26 +78,13 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
     [category]
   );
 
+  // 切换 For you / Premium 时都重新拉取当前 tab 的列表
   useEffect(() => {
-    if (activeTab === "premium") {
-      setItems([]);
-      setCursor(0);
-      setHasMore(true);
-      loadPage(0, false);
-    } else {
-      const initial = initialForYouRef.current;
-      if (initial) {
-        setItems(initial.items);
-        setCursor(initial.next_cursor);
-        setHasMore(initial.has_more);
-        setIsLoading(false);
-      } else {
-        setItems([]);
-        setCursor(0);
-        setHasMore(true);
-        loadPage(0, false);
-      }
-    }
+    setItems([]);
+    setCursor(0);
+    setHasMore(true);
+    setError(null);
+    loadPage(0, false);
   }, [activeTab, loadPage]);
 
   // After returning from post edit, refetch current tab so list shows updated content
@@ -110,19 +95,6 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
       loadPage(0, false);
     }
   }, [loadPage]);
-
-  // SSR 拉取 light 列表时无 auth，purchased 全为 false。用户已登录时在客户端用 token 再拉一次以拿到正确 purchased
-  useEffect(() => {
-    if (
-      activeTab !== "forYou" ||
-      !initialForYouRef.current ||
-      hasRefetchedForYouWithAuth.current ||
-      !getAccessToken()
-    )
-      return;
-    hasRefetchedForYouWithAuth.current = true;
-    loadPage(0, false);
-  }, [activeTab, loadPage]);
 
   const loadMore = useCallback(() => {
     if (!hasMore || loadingRef.current) return;
