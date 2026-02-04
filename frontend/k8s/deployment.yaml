@@ -27,11 +27,12 @@ spec:
           ports:
             - containerPort: 3000
               name: http
+          # ConfigMap 放最后，使 BACKEND_URL 等由 ConfigMap 决定；若 Secret 里误带了 BACKEND_URL=localhost 也不会覆盖
           envFrom:
-            - configMapRef:
-                name: twixter-frontend-config
             - secretRef:
                 name: twixter-frontend-secret
+            - configMapRef:
+                name: twixter-frontend-config
           resources:
             requests:
               memory: "256Mi"
