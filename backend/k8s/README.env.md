@@ -68,7 +68,7 @@ Kustomize 的 `secretGenerator` 读取的是 **本目录下的 `.env`**，即 **
 1. **空闲连接被防火墙/中间设备关闭后，连接池复用了已断开的连接**  
    应用已把 **ConnMaxIdleTime 默认改为 30 秒**（早于常见防火墙空闲超时），减少复用死连接。若仍出现，可在 Secret/ConfigMap 里设 `DB_CONN_MAX_IDLE_TIME=20`（秒）进一步缩短，并重新部署。
 2. **Postgres 与 K8s 在同一台机，用公网 IP 连本机存在 NAT/回环**  
-   改用 **Downward API 的 `status.hostIP` 作为 `DB_HOST`**（见下方「数据库在本机」），避免第二路或后续连接被拒绝。
+   若 **status.hostIP 就是公网 IP**（如 208.x.x.x），用 hostIP 无效。改用 **节点在 Pod 网段的 IP**（k3s 单节点多为 **10.42.0.1**）作为 `DB_HOST`，在 ConfigMap 中设置（见下方「数据库在本机」）。
 
 ### 从 Pod 内验证连通性
 
@@ -107,26 +107,17 @@ psql "host=208.122.213.192 port=5432 user=twixter_store_user dbname=twixter-stor
 
 ### 数据库在本机（Postgres 与 K8s 在同一台机）
 
-若 Postgres 就装在 K8s 节点本机（如 `msd6200`），Pod 连「本机公网 IP」有时会因 **NAT/回环** 导致 connection refused。可改为用 **节点 IP（Downward API）** 作为 `DB_HOST`，让 Pod 直接连节点内网地址：
+若 Postgres 就装在 K8s 节点本机，Pod 连「本机公网 IP」（如 208.122.213.192）常因 **NAT/回环** 导致 connection refused 或 i/o timeout；且 **status.hostIP 在该机上往往就是公网 IP**，用 Downward API 也绕不开。
 
-1. 在 `deployment.yaml` 的 `containers[0]` 里，在 `envFrom` 之后增加一段 `env`（显式 `env` 会覆盖 Secret 里的同名变量）：
+应改为用 **节点在 Pod 网段上的 IP** 作为 `DB_HOST`：k3s 单节点上 Pod 的默认网关多为 **10.42.0.1**，即节点在 Pod 网段的地址，Postgres 监听 `0.0.0.0:5432` 时会在该接口上接受连接。
 
-```yaml
-          envFrom:
-            - secretRef:
-                name: twixter-backend-secret
-            - configMapRef:
-                name: twixter-backend-config
-          env:
-            - name: DB_HOST
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
-```
+1. **在 ConfigMap 里设置 `DB_HOST=10.42.0.1`**（ConfigMap 在 envFrom 中排在 Secret 之后，会覆盖 Secret 的 `DB_HOST`）。  
+   本仓库 `configmap.yaml` 已默认包含 `DB_HOST: "10.42.0.1"`；若你的 Pod 网段网关不是 10.42.0.1，改成实际网关地址即可。  
+2. 本机防火墙仍需放行 5432，来源为 Pod CIDR（如 `10.42.0.0/16`）。  
+3. 若改用**托管 Postgres**（如 RDS），从 ConfigMap 中**删掉** `DB_HOST` 这一项，改由 Secret（`.env`）提供 `DB_HOST`。
 
-2. 从 `backend/k8s/.env` 中**删除或注释** `DB_HOST`，避免 Secret 覆盖上述 `DB_HOST`。  
-3. 本机防火墙仍需放行 5432，来源为 Pod CIDR（如 `10.42.0.0/16`）。  
-若改用**托管 Postgres**（如 RDS），删掉上面这段 `env`，并在 `.env` 里配置 `DB_HOST`。
+应用并重启：`kubectl apply -k k8s/`（或 `kubectl apply -f backend/k8s/configmap.yaml`）后执行 `kubectl rollout restart deployment/twixter-backend`。  
+验证：`kubectl exec deployment/twixter-backend -- env | grep DB_HOST` 应显示 `10.42.0.1`（或你设的网关）。
 
 ### 其他
 
