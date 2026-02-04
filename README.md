@@ -934,7 +934,14 @@ cd ..
 4. **前端 Pod 0/1 READY / 503 Service Temporarily Unavailable**  
    若 `kubectl get pods` 里 frontend 为 `0/1 Running` 或 Ingress 返回 **503**，说明 nginx 找不到就绪的前端 Pod。先查：`kubectl get pods -l app=twixter-frontend`、`kubectl get endpoints twixter-frontend`（无 addresses 即无 Ready Pod）。修前端：看日志 `kubectl logs deployment/twixter-frontend --tail=80`；若 OOM 则提高 `resources.limits.memory` 与探针 `initialDelaySeconds`，再 `kubectl apply -k frontend/k8s/` 并 `kubectl rollout restart deployment/twixter-frontend`。等 frontend 变为 1/1 Running 后再访问。
 
-5. **“Your connection isn’t secure” / TLS 证书无效**  
+5. **帖子页 500 / ECONNREFUSED（SSR 连不上后端）**  
+   若访问 `/en/post/10` 等出现 500 或 “fetch failed / ECONNREFUSED”，说明前端 Pod 内 **BACKEND_URL** 未注入或后端不可达。先确认：  
+   - ConfigMap 已应用且含 `BACKEND_URL`：`kubectl get configmap twixter-frontend-config -o yaml`（应有 `BACKEND_URL: "http://twixter-backend:8080"`）。  
+   - 前端 Pod 已注入该变量：`kubectl exec deployment/twixter-frontend -- env | grep BACKEND_URL`（应输出 `BACKEND_URL=http://twixter-backend:8080`）。  
+   - 后端服务与 Pod 正常：`kubectl get svc twixter-backend`、`kubectl get pods -l app=twixter-backend`。  
+   若 BACKEND_URL 为空，执行 `kubectl apply -f frontend/k8s/configmap.yaml`（或 `kubectl apply -k frontend/k8s/`），再 `kubectl rollout restart deployment/twixter-frontend`。
+
+6. **“Your connection isn’t secure” / TLS 证书无效**  
    Ingress 若配置了 TLS 但未安装 **cert-manager** 或证书未签发，浏览器会报不安全。可暂时用 **http://** 访问（如 `http://www.twixter.store`）；若 nginx 强制跳 HTTPS，可在 Ingress 上增加注解 `nginx.ingress.kubernetes.io/ssl-redirect: "false"` 临时关闭跳转。长期方案：安装 cert-manager、创建 ClusterIssuer（如 letsencrypt-prod），并确保 80 开放供 ACME HTTP-01 校验，证书签发后即可正常用 https。
 
 ### 生产部署小结（twixter.store）

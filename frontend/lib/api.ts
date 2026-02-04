@@ -719,14 +719,23 @@ export async function fetchLibraryContent(
 
 /** Server-only: base URL for API (absolute). Use in server components / server actions. */
 /**
- * SSR 请求本机 Next 的 /api（127.0.0.1:PORT），由 app/api/[...path] 代理用 BACKEND_URL 转发到后端。
- * - NEXT_PUBLIC_* 才会打进浏览器；BACKEND_URL 仅服务端用（API 路由、SSR），不会暴露给前端，Next 和 k3s 都支持。
- * - 用本机地址保证请求一定走同进程的代理，代理里再读 BACKEND_URL（如 http://twixter-backend:8080）连真实后端。
+ * SSR 直接请求后端。优先 BACKEND_URL（k3s ConfigMap 注入），其次 NEXT_PUBLIC_API_URL（构建时或运行时）。
+ * NEXT_PUBLIC_APP_URL 不参与：它是前端站点自己的地址（如 https://www.twixter.store），用于 metadata/OG 等，不表示后端 API。
  */
 export function getServerApiBase(): string {
   if (typeof window !== "undefined") return "";
-  const port = process.env.PORT || "3000";
-  return `http://127.0.0.1:${port}/api`;
+  const url =
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8080";
+  const base = url.replace(/\/+$/, "");
+  const apiBase = base.startsWith("http") ? `${base}/api` : `http://${base}/api`;
+  if (process.env.NODE_ENV === "production" && /^https?:\/\/localhost(:\d+)?(\/|$)/i.test(base)) {
+    throw new Error(
+      "BACKEND_URL is not set in the frontend pod. Apply ConfigMap twixter-frontend-config with BACKEND_URL=http://twixter-backend:8080 and restart the frontend deployment."
+    );
+  }
+  return apiBase;
 }
 
 /** Server-only: fetch current user using token (e.g. from cookies().get(AUTH_TOKEN_COOKIE)?.value). Returns null if no token or API error. */
