@@ -722,10 +722,16 @@ export async function fetchLibraryContent(
  * Server-only API base for fetch from Node (SSR). In K8s, set BACKEND_URL (e.g. http://twixter-backend:8080)
  * so the frontend pod can reach the backend; NEXT_PUBLIC_API_URL (e.g. api.twixter.local) is for the browser
  * and may not resolve inside the cluster.
+ * When BACKEND_URL and NEXT_PUBLIC_API_URL are both unset (e.g. production without env), use NEXT_PUBLIC_APP_URL
+ * so SSR fetches same-origin /api and Next.js rewrites proxy to the backend (avoids ECONNREFUSED on localhost).
  */
 export function getServerApiBase(): string {
   if (typeof window !== "undefined") return "";
-  const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const url =
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    (process.env.NEXT_PUBLIC_APP_URL ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "") : "") ||
+    "http://localhost:8080";
   const base = url.replace(/\/$/, "");
   return base.startsWith("http") ? `${base}/api` : `http://${base}/api`;
 }
