@@ -22,6 +22,17 @@ function authErrorFromResponse(data: { error?: string; details?: string }, fallb
   return details ? `${msg}: ${details}` : msg;
 }
 
+/** Fetch with timeout so list/feed requests don't hang when backend is slow or unreachable (e.g. unauthenticated). */
+function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = 15_000
+): Promise<Response> {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: ac.signal }).finally(() => clearTimeout(t));
+}
+
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -151,17 +162,30 @@ export type CurrentUser = {
   membership_expires_at?: string | null;
 };
 
+/** Single in-flight promise so many components (e.g. 20 ContentCards + sidebars) trigger only one /auth/me request. Cleared when settled. */
+let currentUserPromise: Promise<CurrentUser | null> | null = null;
+
 export async function fetchCurrentUser(): Promise<CurrentUser | null> {
-  const base = getApiBase();
   if (!getAccessToken() && !getRefreshToken()) return null;
-  try {
-    const res = await fetchWithAuth(`${base}/auth/me`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.user ?? null;
-  } catch {
-    return null;
-  }
+  if (currentUserPromise) return currentUserPromise;
+  const base = getApiBase();
+  currentUserPromise = (async () => {
+    try {
+      const res = await fetchWithAuth(`${base}/auth/me`);
+      if (res.status === 401) {
+        clearTokens();
+        return null;
+      }
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.user ?? null;
+    } catch {
+      return null;
+    } finally {
+      currentUserPromise = null;
+    }
+  })();
+  return currentUserPromise;
 }
 
 /** Fetch encrypted viewing token for URL/cookie (mode=light|dark). Backend-only decrypts. */
@@ -366,8 +390,9 @@ export type ContentFeedItem = {
   description: string;
   category: string;
   price: number;
+  /** 按权限返回：已购买为正常 GIF URL，未购买为模糊 GIF URL（上传时生成） */
   preview_gif_url: string;
-  /** 列表预取的模糊 GIF（base64），有则直接用作 data URL，无需请求 /preview */
+  /** @deprecated 后端不再预取 base64，保留兼容 */
   preview_gif_base64?: string;
   first_file_id: number;
   purchased: boolean;
@@ -395,6 +420,7 @@ export type ContentDetail = {
     author_avatar?: string;
     tags?: string[];
   };
+  /** 按权限返回：已购买为正常 GIF URL，未购买为模糊 GIF URL */
   files: Array<{
     id: number;
     file_name: string;
@@ -557,10 +583,11 @@ export async function fetchContentFeed(
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/content/list?${params}`, {
-    headers,
-    cache: "no-store",
-  });
+  const res = await fetchWithTimeout(
+    `${base}/content/list?${params}`,
+    { headers, cache: "no-store" },
+    15_000
+  );
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
@@ -587,10 +614,11 @@ export async function fetchContentFeedByTag(
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/content/list?${params}`, {
-    headers,
-    cache: "no-store",
-  });
+  const res = await fetchWithTimeout(
+    `${base}/content/list?${params}`,
+    { headers, cache: "no-store" },
+    15_000
+  );
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
@@ -619,10 +647,11 @@ export async function fetchContentFeedSearch(
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/content/list?${params}`, {
-    headers,
-    cache: "no-store",
-  });
+  const res = await fetchWithTimeout(
+    `${base}/content/list?${params}`,
+    { headers, cache: "no-store" },
+    15_000
+  );
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
@@ -772,7 +801,11 @@ export async function fetchTrendingTagsServer(
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   try {
-    const res = await fetch(`${base}/tags/trending?${params}`, { headers, cache: "no-store" });
+    const res = await fetchWithTimeout(
+      `${base}/tags/trending?${params}`,
+      { headers, cache: "no-store" },
+      10_000
+    );
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data?.tags) ? data.tags : [];
@@ -797,10 +830,11 @@ export async function fetchContentFeedServer(
   });
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${base}/content/list?${params}`, {
-    cache: "no-store",
-    headers,
-  });
+  const res = await fetchWithTimeout(
+    `${base}/content/list?${params}`,
+    { cache: "no-store", headers },
+    10_000
+  );
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     return { items: [], next_cursor: 0, has_more: false };
@@ -841,7 +875,11 @@ export async function fetchTrendingTags(
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   try {
-    const res = await fetch(`${base}/tags/trending?${params}`, { headers, cache: "no-store" });
+    const res = await fetchWithTimeout(
+      `${base}/tags/trending?${params}`,
+      { headers, cache: "no-store" },
+      15_000
+    );
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data?.tags) ? data.tags : [];

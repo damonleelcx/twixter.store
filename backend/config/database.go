@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // getEnv 获取环境变量，如果不存在则返回默认值
@@ -39,10 +40,21 @@ func InitDB() (*gorm.DB, error) {
 	maxRetries := 10
 	retryDelay := 2 * time.Second
 
+	// GORM logger: 不把 "record not found" 当错误打印（业务层正常处理，避免登录/列表等请求刷屏）
+	gormLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			IgnoreRecordNotFoundError: true,
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			Colorful:                  false,
+		},
+	)
+
 	var database *gorm.DB
 	var err error
 	for i := 0; i < maxRetries; i++ {
-		database, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		database, err = gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormLogger})
 		if err == nil {
 			sqlDB, dbErr := database.DB()
 			if dbErr != nil {

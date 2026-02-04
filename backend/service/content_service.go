@@ -3,23 +3,15 @@ package service
 import (
 	"backend/entity"
 	"backend/repository"
-	"bytes"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"image"
-	"image/draw"
-	"image/gif"
 	"io"
 	"mime/multipart"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/disintegration/imaging"
 	"gorm.io/gorm"
 )
 
@@ -72,7 +64,7 @@ type ContentService interface {
 	// ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部
 	ListFeedSearch(q string, category string, userID uint, limit, offset int) ([]ListFeedItem, error)
 
-	// GetGifPreview 返回 GIF 预览：已购买则流式返回原图；未购买则从 S3 取 GIF、模糊后返回 JPEG
+	// GetGifPreview 返回 GIF 预览：已购买则流式返回正常 GIF；未购买则流式返回上传时生成的模糊 GIF
 	GetGifPreview(fileID uint, userID uint) (body io.ReadCloser, contentType string, err error)
 
 	// GetAuthorForUserID 根据上传者 ID 返回作者用户名和头像 URL（用于帖子详情等）
@@ -100,15 +92,15 @@ type ContentService interface {
 }
 
 // ListFeedItem feed 列表单项（含作者、时间戳、标签，Twitter 风格）
-// 未购买项可带 PreviewGifBase64，前端直接使用 data URL，无需再请求 /preview
-type ListFeedItem struct {
-	ID               uint     `json:"id"`
-	Name             string   `json:"name"`
-	Description      string   `json:"description"`
-	Category         string   `json:"category"`
-	Price            float64  `json:"price"`
-	PreviewGifURL    string   `json:"preview_gif_url"`
-	PreviewGifBase64 string   `json:"preview_gif_base64,omitempty"` // 列表预取的模糊 GIF（base64），有则前端不请求 /preview
+// PreviewGifURL 按权限返回：已购买为正常 GIF URL，未购买为模糊 GIF URL（上传时生成）
+	type ListFeedItem struct {
+		ID               uint     `json:"id"`
+		Name             string   `json:"name"`
+		Description      string   `json:"description"`
+		Category         string   `json:"category"`
+		Price            float64  `json:"price"`
+		PreviewGifURL    string   `json:"preview_gif_url"`
+		PreviewGifBase64 string   `json:"preview_gif_base64,omitempty"` // 保留兼容，不再使用
 	FirstFileID      uint     `json:"first_file_id"`
 	Purchased        bool     `json:"purchased"`
 	Bookmarked       bool     `json:"bookmarked,omitempty"`
@@ -422,13 +414,16 @@ func (s *contentService) DeleteContent(contentID uint) error {
 	if err != nil {
 		return fmt.Errorf("failed to get content files: %w", err)
 	}
-	// 从 S3 删除每个文件的原始、GIF、转码（m3u8 + segments）
+	// 从 S3 删除每个文件的原始、GIF、模糊 GIF、转码（m3u8 + segments）
 	for _, f := range files {
 		if f.OriginalFilePath != "" {
 			_ = s.s3Service.DeleteFile("", f.OriginalFilePath)
 		}
 		if f.GifFilePath != "" {
 			_ = s.s3Service.DeleteFile("", f.GifFilePath)
+		}
+		if f.GifBlurFilePath != "" {
+			_ = s.s3Service.DeleteFile("", f.GifBlurFilePath)
 		}
 		if f.TranscodedFilePath != "" {
 			prefix := strings.TrimSuffix(f.TranscodedFilePath, ".m3u8")
@@ -616,14 +611,9 @@ func (s *contentService) GetContentAnalytics(contentID uint, startDate, endDate 
 	return result, nil
 }
 
-// buildListFeedItems 将 contents 转为 ListFeedItem 列表（共用逻辑）；未购买项预取模糊 GIF 内联返回
+// buildListFeedItems 将 contents 转为 ListFeedItem 列表（共用逻辑）；按权限返回正常或模糊 GIF URL
 func (s *contentService) buildListFeedItems(contents []entity.Content, userID uint) ([]ListFeedItem, error) {
 	out := make([]ListFeedItem, 0, len(contents))
-	type blurJob struct {
-		idx  int
-		path string
-	}
-	var needBlur []blurJob
 	for _, c := range contents {
 		authorUsername := ""
 		if c.UploadedBy > 0 && s.userRepo != nil {
@@ -673,15 +663,18 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 			continue
 		}
 		first := files[0]
-		previewGif := first.GifFileURL
 		purchased := false
 		bookmarked := false
 		if userID > 0 {
 			purchased, _ = s.UserCanViewContent(userID, c.ID)
 			bookmarked, _ = s.contentBookmarkRepo.Exists(userID, c.ID)
 		}
+		// 已购买用正常 GIF URL，未购买用上传时生成的模糊 GIF URL
+		previewGif := first.GifFileURL
+		if !purchased && first.GifBlurFileURL != "" {
+			previewGif = first.GifBlurFileURL
+		}
 		tagNames, _ := s.GetContentTagNames(c.ID)
-		idx := len(out)
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -696,36 +689,6 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 			AuthorUsername: authorUsername,
 			Tags:           tagNames,
 		})
-		if !purchased && first.GifFilePath != "" {
-			needBlur = append(needBlur, blurJob{idx: idx, path: first.GifFilePath})
-		}
-	}
-	// 单条 base64 不超过此大小，避免触发 Redis/缓存 "Single item size exceeds maxSize"
-	const maxPreviewGifBase64Bytes = 256 * 1024 // 256KB per item
-	// 并发预取模糊 GIF（受 gifBlurSem 限制），写入 results 再合并到 out
-	results := make([]string, len(out))
-	var wg sync.WaitGroup
-	for _, job := range needBlur {
-		wg.Add(1)
-		go func(i int, gifPath string) {
-			defer wg.Done()
-			gifBlurSem <- struct{}{}
-			defer func() { <-gifBlurSem }()
-			blurred, err := s.getGifBlurredGIF(gifPath)
-			if err != nil {
-				return
-			}
-			b64 := base64.StdEncoding.EncodeToString(blurred)
-			if len(b64) <= maxPreviewGifBase64Bytes {
-				results[i] = b64
-			}
-		}(job.idx, job.path)
-	}
-	wg.Wait()
-	for i, b64 := range results {
-		if b64 != "" {
-			out[i].PreviewGifBase64 = b64
-		}
 	}
 	return out, nil
 }
@@ -927,14 +890,11 @@ func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) (
 	return s.buildListFeedItems(contents, userID)
 }
 
-// GetGifPreview 返回 GIF 预览：已购买则流式返回原图；未购买则从 S3 取 GIF、模糊后返回 GIF
+// GetGifPreview 返回 GIF 预览：已购买则流式返回正常 GIF；未购买则流式返回上传时生成的模糊 GIF
 func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser, string, error) {
 	file, err := s.fileRepo.GetByID(fileID)
 	if err != nil {
 		return nil, "", fmt.Errorf("file not found: %w", err)
-	}
-	if file.GifFilePath == "" {
-		return nil, "", fmt.Errorf("no gif for file %d", fileID)
 	}
 	content, err := s.contentRepo.GetByID(file.ContentID)
 	if err != nil {
@@ -944,132 +904,25 @@ func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser,
 	if userID > 0 {
 		canView, _ = s.UserCanViewContent(userID, content.ID)
 	}
+	var s3Key string
 	if canView {
-		reader, contentType, err := s.s3Service.StreamFile("", file.GifFilePath)
-		if err != nil {
-			return nil, "", err
+		if file.GifFilePath == "" {
+			return nil, "", fmt.Errorf("no gif for file %d", fileID)
 		}
-		if contentType == "" {
-			contentType = "image/gif"
+		s3Key = file.GifFilePath
+	} else {
+		if file.GifBlurFilePath == "" {
+			return nil, "", fmt.Errorf("no blur gif for file %d", fileID)
 		}
-		return reader, contentType, nil
+		s3Key = file.GifBlurFilePath
 	}
-	// 限制并发模糊数量，避免列表多预览并发时压垮 DB 连接/CPU
-	gifBlurSem <- struct{}{}
-	defer func() { <-gifBlurSem }()
-	blurred, err := s.getGifBlurredGIF(file.GifFilePath)
+	reader, contentType, err := s.s3Service.StreamFile("", s3Key)
 	if err != nil {
 		return nil, "", err
 	}
-	return io.NopCloser(bytes.NewReader(blurred)), "image/gif", nil
+	if contentType == "" {
+		contentType = "image/gif"
+	}
+	return reader, contentType, nil
 }
 
-const gifBlurRadius = 3 // 较小半径更快，仍能模糊；5 太慢
-
-// gifBlurConcurrency 限制同时进行的 GIF 模糊处理数量；提高以加快列表首屏（8 可显著缩短等待）
-const gifBlurConcurrency = 8
-
-// maxPreviewGifFrames 列表预览最多模糊的帧数，超出则采样前 N 帧以加快单张处理
-const maxPreviewGifFrames = 12
-
-var gifBlurSem = make(chan struct{}, gifBlurConcurrency)
-
-func ensureLen(d []int, n int) []int {
-	if len(d) >= n {
-		return d[:n]
-	}
-	out := make([]int, n)
-	copy(out, d)
-	last := 0
-	if len(d) > 0 {
-		last = d[len(d)-1]
-	}
-	for i := len(d); i < n; i++ {
-		out[i] = last
-	}
-	return out
-}
-
-func ensureDisposalLen(d []byte, n int) []byte {
-	if len(d) >= n {
-		return d[:n]
-	}
-	out := make([]byte, n)
-	copy(out, d)
-	var last byte
-	if len(d) > 0 {
-		last = d[len(d)-1]
-	}
-	for i := len(d); i < n; i++ {
-		out[i] = last
-	}
-	return out
-}
-
-// getGifBlurredGIF 从 S3 拉取 GIF，逐帧模糊后编码为完整多帧 GIF（保留延迟与循环）
-func (s *contentService) getGifBlurredGIF(gifS3Key string) ([]byte, error) {
-	reader, _, err := s.s3Service.StreamFile("", gifS3Key)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
-	}
-	img, err := gif.DecodeAll(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("decode gif: %w", err)
-	}
-	if len(img.Image) == 0 {
-		return nil, fmt.Errorf("empty gif")
-	}
-
-	n := len(img.Image)
-	if n > maxPreviewGifFrames {
-		n = maxPreviewGifFrames
-	}
-	blurredFrames := make([]*image.Paletted, n)
-	workers := runtime.NumCPU()
-	if workers > n {
-		workers = n
-	}
-	if workers < 1 {
-		workers = 1
-	}
-	var wg sync.WaitGroup
-	ch := make(chan int, n)
-	for i := 0; i < n; i++ {
-		ch <- i
-	}
-	close(ch)
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range ch {
-				frame := img.Image[i]
-				blurred := imaging.Blur(imaging.Clone(frame), gifBlurRadius)
-				dst := image.NewPaletted(blurred.Bounds(), frame.Palette)
-				draw.Draw(dst, dst.Bounds(), blurred, image.Point{}, draw.Src)
-				blurredFrames[i] = dst
-			}
-		}()
-	}
-	wg.Wait()
-
-	out := &gif.GIF{
-		Image:           blurredFrames,
-		Delay:           ensureLen(img.Delay, len(blurredFrames)),
-		Disposal:        ensureDisposalLen(img.Disposal, len(blurredFrames)),
-		LoopCount:       img.LoopCount,
-		Config:          img.Config,
-		BackgroundIndex: img.BackgroundIndex,
-	}
-
-	var buf bytes.Buffer
-	if err := gif.EncodeAll(&buf, out); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}

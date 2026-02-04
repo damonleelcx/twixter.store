@@ -34,10 +34,16 @@ async function proxy(request: NextRequest, pathSegments: string[]) {
     headers.set(key, value);
   });
 
+  /** GET (content list, tags, etc.) 15s; others 30s so unauthenticated/list requests don't hang. */
+  const timeoutMs = request.method === "GET" ? 15_000 : 30_000;
+  const ac = new AbortController();
+  const timeoutId = setTimeout(() => ac.abort(), timeoutMs);
+
   const init: RequestInit = {
     method: request.method,
     headers,
     cache: "no-store",
+    signal: ac.signal,
   };
   if (request.body && ["POST", "PUT", "PATCH"].includes(request.method)) {
     init.body = request.body;
@@ -46,6 +52,7 @@ async function proxy(request: NextRequest, pathSegments: string[]) {
 
   try {
     const res = await fetch(url, init);
+    clearTimeout(timeoutId);
     const contentType = res.headers.get("content-type");
     const body = await res.arrayBuffer();
     return new NextResponse(body, {
@@ -57,11 +64,16 @@ async function proxy(request: NextRequest, pathSegments: string[]) {
       },
     });
   } catch (err) {
+    clearTimeout(timeoutId);
+    const isAbort = err instanceof Error && err.name === "AbortError";
     const message = err instanceof Error ? err.message : "Proxy request failed";
     const code = err && typeof (err as { code?: string }).code === "string" ? (err as { code: string }).code : "";
     return NextResponse.json(
-      { error: message, ...(code === "ECONNREFUSED" && { details: "Backend unreachable; check BACKEND_URL and backend pod." }) },
-      { status: 502 }
+      {
+        error: isAbort ? "Backend request timed out" : message,
+        ...(code === "ECONNREFUSED" && { details: "Backend unreachable; check BACKEND_URL and backend pod." }),
+      },
+      { status: isAbort ? 504 : 502 }
     );
   }
 }

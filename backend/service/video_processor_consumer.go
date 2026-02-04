@@ -118,7 +118,7 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		gifFileSize = gifFileInfo.Size()
 	}
 
-	// 上传GIF到S3（成功或失败后本地文件都会在 defer 中尝试删除）
+	// 上传正常 GIF 到 S3
 	gifS3Key := fmt.Sprintf("gifs/%d/%d_%d.gif", file.ContentID, fileID, time.Now().Unix())
 	gifURL, err := v.s3Service.UploadFileFromPath("", gifS3Key, localGifPath, "image/gif")
 	if err != nil {
@@ -126,13 +126,38 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		return err
 	}
 
-	// 更新文件记录（失败时删除已上传的 GIF）
+	// 生成模糊 GIF 并上传（上传阶段一次生成，获取时按权限直接返回）
+	localGifBlurPath := filepath.Join(v.tempDir, fmt.Sprintf("gif_blur_%d_%d.gif", fileID, time.Now().Unix()))
+	if err := v.videoProcessingService.BlurGif(localGifPath, localGifBlurPath); err != nil {
+		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to generate blur GIF: %v", err))
+		_ = v.s3Service.DeleteFile("", gifS3Key)
+		return err
+	}
+	defer func() { _ = os.Remove(localGifBlurPath) }()
+
+	gifBlurFileSize := int64(0)
+	if fi, err := os.Stat(localGifBlurPath); err == nil {
+		gifBlurFileSize = fi.Size()
+	}
+	gifBlurS3Key := fmt.Sprintf("gifs/%d/%d_%d_blur.gif", file.ContentID, fileID, time.Now().Unix())
+	gifBlurURL, err := v.s3Service.UploadFileFromPath("", gifBlurS3Key, localGifBlurPath, "image/gif")
+	if err != nil {
+		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload blur GIF: %v", err))
+		_ = v.s3Service.DeleteFile("", gifS3Key)
+		return err
+	}
+
+	// 更新文件记录（失败时删除已上传的 GIF 与模糊 GIF）
 	file.GifFilePath = gifS3Key
 	file.GifFileURL = gifURL
 	file.GifFileSize = gifFileSize
+	file.GifBlurFilePath = gifBlurS3Key
+	file.GifBlurFileURL = gifBlurURL
+	file.GifBlurFileSize = gifBlurFileSize
 	file.Stage = entity.StageGifGenerated
 	if err := v.fileRepo.Update(file); err != nil {
 		_ = v.s3Service.DeleteFile("", gifS3Key)
+		_ = v.s3Service.DeleteFile("", gifBlurS3Key)
 		return fmt.Errorf("failed to update file: %w", err)
 	}
 
@@ -143,7 +168,7 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		_ = v.contentRepo.Update(content)
 	}
 
-	// 发送转码任务消息（失败时删除已上传的 GIF）
+	// 发送转码任务消息（失败时删除已上传的 GIF 与模糊 GIF）
 	transcodeMsg := &KafkaMessage{
 		Type:      "video_transcode",
 		ContentID: file.ContentID,
@@ -155,6 +180,7 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 	}
 	if err := v.kafkaService.SendMessage(TopicVideoTranscode, transcodeMsg); err != nil {
 		_ = v.s3Service.DeleteFile("", gifS3Key)
+		_ = v.s3Service.DeleteFile("", gifBlurS3Key)
 		return fmt.Errorf("failed to send transcode message: %w", err)
 	}
 	return nil

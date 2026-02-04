@@ -33,9 +33,13 @@ type ContentFile struct {
 	MimeType         string `gorm:"size:100" json:"mime_type"`                    // MIME类型
 
 	// GIF文件信息
-	GifFilePath string `gorm:"type:text" json:"gif_file_path"` // GIF文件S3路径
+	GifFilePath string `gorm:"type:text" json:"gif_file_path"` // GIF文件S3路径（正常预览）
 	GifFileURL  string `gorm:"type:text" json:"gif_file_url"`  // GIF文件URL
 	GifFileSize int64  `gorm:"default:0" json:"gif_file_size"` // GIF文件大小
+	// 模糊GIF（上传时生成，未购买时直接使用）
+	GifBlurFilePath string `gorm:"type:text" json:"gif_blur_file_path"`
+	GifBlurFileURL  string `gorm:"type:text" json:"gif_blur_file_url"`
+	GifBlurFileSize int64  `gorm:"default:0" json:"gif_blur_file_size"`
 
 	// 转码文件信息
 	TranscodedFilePath string `gorm:"type:text" json:"transcoded_file_path"` // 转码文件S3路径

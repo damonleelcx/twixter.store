@@ -3,11 +3,18 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/gif"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+
+	"github.com/disintegration/imaging"
 )
 
 // VideoProcessingService 视频处理服务接口
@@ -17,6 +24,9 @@ type VideoProcessingService interface {
 
 	// GenerateGifSampled 从整段视频中均匀采样 numFrames 帧生成GIF
 	GenerateGifSampled(videoPath, outputPath string, duration float64, numFrames int) error
+
+	// BlurGif 从本地 GIF 文件生成模糊版并写入 outputPath（上传阶段用）
+	BlurGif(inputPath, outputPath string) error
 
 	// TranscodeVideo 转码视频为HLS格式（.m3u8 + .ts 分片）
 	TranscodeVideo(inputPath, outputDir, outputName string, options *TranscodeOptions) (*HLSOutput, error)
@@ -183,6 +193,105 @@ func (v *videoProcessingService) GenerateGifSampled(videoPath, outputPath string
 			}
 		}
 		return fmt.Errorf("failed to generate GIF: %w (ffmpeg: %s)", err, msg)
+	}
+	return nil
+}
+
+const gifBlurRadius = 3
+const maxBlurGifFrames = 12
+
+func ensureDelayLen(d []int, n int) []int {
+	if len(d) >= n {
+		return d[:n]
+	}
+	out := make([]int, n)
+	copy(out, d)
+	last := 0
+	if len(d) > 0 {
+		last = d[len(d)-1]
+	}
+	for i := len(d); i < n; i++ {
+		out[i] = last
+	}
+	return out
+}
+
+func ensureDisposalLen(d []byte, n int) []byte {
+	if len(d) >= n {
+		return d[:n]
+	}
+	out := make([]byte, n)
+	copy(out, d)
+	var last byte
+	if len(d) > 0 {
+		last = d[len(d)-1]
+	}
+	for i := len(d); i < n; i++ {
+		out[i] = last
+	}
+	return out
+}
+
+// BlurGif 从本地 GIF 文件生成模糊版并写入 outputPath
+func (v *videoProcessingService) BlurGif(inputPath, outputPath string) error {
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("read gif: %w", err)
+	}
+	img, err := gif.DecodeAll(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("decode gif: %w", err)
+	}
+	if len(img.Image) == 0 {
+		return fmt.Errorf("empty gif")
+	}
+	n := len(img.Image)
+	if n > maxBlurGifFrames {
+		n = maxBlurGifFrames
+	}
+	blurredFrames := make([]*image.Paletted, n)
+	workers := runtime.NumCPU()
+	if workers > n {
+		workers = n
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	var wg sync.WaitGroup
+	ch := make(chan int, n)
+	for i := 0; i < n; i++ {
+		ch <- i
+	}
+	close(ch)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range ch {
+				frame := img.Image[i]
+				blurred := imaging.Blur(imaging.Clone(frame), gifBlurRadius)
+				dst := image.NewPaletted(blurred.Bounds(), frame.Palette)
+				draw.Draw(dst, dst.Bounds(), blurred, image.Point{}, draw.Src)
+				blurredFrames[i] = dst
+			}
+		}()
+	}
+	wg.Wait()
+	out := &gif.GIF{
+		Image:           blurredFrames,
+		Delay:           ensureDelayLen(img.Delay, len(blurredFrames)),
+		Disposal:        ensureDisposalLen(img.Disposal, len(blurredFrames)),
+		LoopCount:       img.LoopCount,
+		Config:          img.Config,
+		BackgroundIndex: img.BackgroundIndex,
+	}
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("create output: %w", err)
+	}
+	defer outFile.Close()
+	if err := gif.EncodeAll(outFile, out); err != nil {
+		return fmt.Errorf("encode gif: %w", err)
 	}
 	return nil
 }
