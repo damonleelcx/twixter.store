@@ -6,13 +6,16 @@ import (
 	"backend/repository"
 	"backend/service"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ContentController 内容控制器
@@ -547,9 +550,19 @@ func (cc *ContentController) StreamGifPreview(c *gin.Context) {
 	}
 	reader, contentType, err := cc.contentService.GetGifPreview(uint(fileID), userID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Preview not found",
-		})
+		// 先判断 DB/网络暂时不可用（service 可能包装成 "file not found: ... connection refused"）
+		errStr := err.Error()
+		var netErr *net.OpError
+		if errors.As(err, &netErr) || strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "failed to connect") || strings.Contains(errStr, "dial tcp") {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service temporarily unavailable"})
+			return
+		}
+		// 再区分“文件/内容不存在”或“无 GIF”
+		if errors.Is(err, gorm.ErrRecordNotFound) || strings.Contains(errStr, "not found") || strings.Contains(errStr, "no gif for file") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Preview not found"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Preview not found"})
 		return
 	}
 	defer reader.Close()
