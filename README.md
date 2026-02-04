@@ -809,7 +809,8 @@ cd ..
    - **Minikube**：先 `eval $(minikube docker-env)` 再构建，则镜像在 Minikube 内可见，无需 push。
    - **k3s**：k3s 无 `minikube docker-env` 等价命令。可选其一：
      1. **导入到 k3s 的 containerd**：构建后执行  
-        `docker save <镜像名>:<tag> | sudo k3s ctr images import -`  
+        `docker save damonleelcx/twixter.store-backend:latest | sudo k3s ctr images import -`  
+        `docker save damonleelcx/twixter.store-frontend:latest | sudo k3s ctr images import -`  
         则集群可直接使用该镜像（无需 push）。
      2. **安装 k3s 时使用本机 Docker**：安装时加 `--docker`（如  
         `curl -sfL https://get.k3s.io | sh -s - --docker`），则本机 `docker build` 的镜像与 k3s 共用同一 Docker，直接构建即可，无需 push。

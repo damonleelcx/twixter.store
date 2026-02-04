@@ -128,7 +128,7 @@ kubectl logs deployment/twixter-backend --tail=100
 kubectl logs twixter-backend-65c9dfbbb7-tztdc --tail=100
 ```
 
-常见原因：**数据库连不上**（见下方「no route to host」）、**Redis 连不上**（检查 `REDIS_ADDR` 是否指向集群内 `redis-service:6379`）、**Kafka 连不上**（检查 `KAFKA_BROKERS`）、或 **S3/Stripe 等配置缺失**（应用可能仍能启动，仅部分功能不可用）。
+常见原因：**数据库连不上**（见下方「connection refused」与「no route to host」）、**Redis 连不上**（检查 `REDIS_ADDR` 是否指向集群内 `redis-service:6379`）、**Kafka 连不上**（检查 `KAFKA_BROKERS`）、或 **S3/Stripe 等配置缺失**（应用可能仍能启动，仅部分功能不可用）。
 
 ### 查看 Frontend 日志（Next.js 进程退出或 OOM）
 
@@ -151,6 +151,61 @@ kubectl describe pod -l app=twixter-frontend
 
 - **Backend**：先保证 DB、Redis 在集群内或可从 Pod 访问，再根据日志逐项修配置或网络。
 - **Frontend**：若为 OOM，在 `frontend/k8s/deployment.yaml` 中适当提高 `resources.requests.memory` / `resources.limits.memory`（例如 256Mi / 1Gi）；若缺 Secret，确保 `frontend/k8s/.env` 存在或改用 `secret.yaml`。
+
+## 故障排查：数据库连接 "connection refused"（5432 无服务监听）
+
+若出现类似错误：
+
+```text
+failed to connect to ... 208.122.213.192:5432: dial tcp ... connect: connection refused
+```
+
+说明请求**能到达**数据库主机 `208.122.213.192`，但该机 **5432 端口没有进程在监听**（或主动拒绝）。与 "no route to host" 不同，问题在**数据库本机**：PostgreSQL 未运行或未监听外网接口。
+
+### 在数据库所在主机（208.122.213.192）上排查
+
+1. **确认 PostgreSQL 是否在运行**：
+
+   ```bash
+   sudo systemctl status postgresql
+   # 或
+   sudo systemctl status postgresql-15
+   ```
+
+   若未运行：`sudo systemctl start postgresql`（或 `postgresql-15`），并 `sudo systemctl enable postgresql` 开机自启。
+
+2. **确认是否监听 0.0.0.0:5432**：
+
+   ```bash
+   sudo ss -tlnp | grep 5432
+   ```
+
+   - 若看到 **`0.0.0.0:5432`** 或 **`*:5432`**：说明已监听所有接口，此时若仍 connection refused，再检查本机防火墙是否拦截（见下方「no route to host」里的放行 5432）。
+   - 若看到 **`127.0.0.1:5432`**：说明只监听本机，**外网连不上**。需要改 `postgresql.conf` 的 `listen_addresses = '*'` 并重启 PostgreSQL，详见下方「PostgreSQL listen_addresses 与 pg_hba.conf」。
+
+3. **改完配置后重启并再次确认**：
+
+   ```bash
+   sudo systemctl restart postgresql
+   sudo ss -tlnp | grep 5432
+   ```
+
+   确认出现 `0.0.0.0:5432` 后，再从 k3s 节点或 Pod 内用 `nc -zv 208.122.213.192 5432` 测试；通过后重启 Backend：`kubectl rollout restart deployment/twixter-backend`。
+
+### 间歇性 connection refused（重启 Backend 后恢复）
+
+若 **PostgreSQL 已确认在运行且监听 5432**，但 Backend 仍偶发 `dial tcp ... connection refused`，且**重启 Backend 后一段时间内正常**，多半是**空闲连接被防火墙/云 LB 或数据库端关闭**，连接池复用了已断开的连接。
+
+Backend 已做以下配置（`config/database.go`）以减轻该问题：
+
+- **SetConnMaxIdleTime(1 分钟)**：空闲超过 1 分钟的连接会被关闭，下次请求会新建连接，避免复用“已被中间设备关闭”的空闲连接。
+- **SetConnMaxLifetime(5 分钟)**：连接最长存活 5 分钟，定期回收。
+
+若仍频繁出现，可：
+
+1. **确认托管 DB / 防火墙**：云厂商的“空闲超时”或安全组是否过短（例如 &lt; 1 分钟），适当放长或与 Backend 空闲时间一致。
+2. **缩短 Backend 空闲时间**：在代码中把 `SetConnMaxIdleTime` 调得更小（例如 30 秒），需重新构建镜像并部署。
+3. **使用连接池代理**：在 DB 前加 PgBouncer 等，由代理维持与 PostgreSQL 的长连接，Backend 只与代理短连接。
 
 ## 故障排查：数据库连接 "no route to host"（k3s / Rocky Linux 8）
 

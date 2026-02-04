@@ -55,6 +55,7 @@ func InitDB() (*gorm.DB, error) {
 				sqlDB.SetMaxIdleConns(5)
 				sqlDB.SetMaxOpenConns(25)
 				sqlDB.SetConnMaxLifetime(5 * time.Minute) // 定期回收连接，减少使用已断开的连接
+				sqlDB.SetConnMaxIdleTime(1 * time.Minute) // 空闲超过 1 分钟即关闭，避免 K3s/云环境防火墙关闭空闲连接后复用导致 dial tcp: connection refused
 				log.Println("Successfully connected to PostgreSQL database")
 				return database, nil
 			}
