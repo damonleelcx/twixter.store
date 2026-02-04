@@ -29,9 +29,7 @@ async function proxy(request: NextRequest, pathSegments: string[]) {
   };
   if (request.body && ["POST", "PUT", "PATCH"].includes(request.method)) {
     init.body = request.body;
-    if (request.headers.get("content-length")) {
-      init.duplex = "half";
-    }
+    (init as RequestInit & { duplex?: "half" }).duplex = "half";
   }
 
   try {
