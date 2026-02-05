@@ -90,13 +90,26 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		return nil
 	}
 
-	// 下载原始视频到临时目录
-	localVideoPath := filepath.Join(v.tempDir, fmt.Sprintf("video_%d_%d.mp4", fileID, time.Now().Unix()))
-	if err := v.s3Service.DownloadFileToPath("", file.OriginalFilePath, localVideoPath); err != nil {
-		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download video: %v", err))
-		return err
+	// bulk_upload 本地模式：消息带 local_path 时直接使用本地文件，不下载 S3
+	var localVideoPath string
+	var removeLocalWhenDone bool
+	if localPath, ok := msg.Data["local_path"].(string); ok && localPath != "" {
+		localVideoPath = localPath
+		removeLocalWhenDone = false
+	} else {
+		localVideoPath = filepath.Join(v.tempDir, fmt.Sprintf("video_%d_%d.mp4", fileID, time.Now().Unix()))
+		if err := v.s3Service.DownloadFileToPath("", file.OriginalFilePath, localVideoPath); err != nil {
+			v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download video: %v", err))
+			return err
+		}
+		removeLocalWhenDone = true
 	}
-	defer func() { _ = os.Remove(localVideoPath) }()
+	defer func() {
+		// 仅清理从 S3 下载的临时文件；本地模式（local_path）不删用户文件
+		if removeLocalWhenDone {
+			_ = os.Remove(localVideoPath)
+		}
+	}()
 
 	// 获取视频信息以使用整段视频时长生成GIF（帧从全片选取）
 	videoInfo, err := v.videoProcessingService.GetVideoInfo(localVideoPath)
@@ -184,15 +197,17 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		_ = v.contentRepo.Update(content)
 	}
 
-	// 发送转码任务消息（失败时删除已上传的 GIF 与模糊 GIF）
+	// 发送转码任务消息（失败时删除已上传的 GIF 与模糊 GIF）；本地模式时带上 local_path 供转码阶段直接读本地文件
+	transcodeData := map[string]interface{}{"s3_key": file.OriginalFilePath}
+	if localPath, ok := msg.Data["local_path"].(string); ok && localPath != "" {
+		transcodeData["local_path"] = localPath
+	}
 	transcodeMsg := &KafkaMessage{
 		Type:      "video_transcode",
 		ContentID: file.ContentID,
 		FileID:    fileID,
 		Stage:     string(entity.StageGifGenerated),
-		Data: map[string]interface{}{
-			"s3_key": file.OriginalFilePath,
-		},
+		Data:      transcodeData,
 	}
 	if err := v.kafkaService.SendMessage(TopicVideoTranscode, transcodeMsg); err != nil {
 		_ = v.s3Service.DeleteFile("", gifS3Key)
@@ -220,13 +235,26 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		return nil
 	}
 
-	// 下载原始视频到临时目录
-	localVideoPath := filepath.Join(v.tempDir, fmt.Sprintf("video_%d_%d.mp4", fileID, time.Now().Unix()))
-	if err := v.s3Service.DownloadFileToPath("", file.OriginalFilePath, localVideoPath); err != nil {
-		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download video: %v", err))
-		return err
+	// bulk_upload 本地模式：消息带 local_path 时直接使用本地文件
+	var localVideoPath string
+	var removeLocalWhenDone bool
+	if localPath, ok := msg.Data["local_path"].(string); ok && localPath != "" {
+		localVideoPath = localPath
+		removeLocalWhenDone = false
+	} else {
+		localVideoPath = filepath.Join(v.tempDir, fmt.Sprintf("video_%d_%d.mp4", fileID, time.Now().Unix()))
+		if err := v.s3Service.DownloadFileToPath("", file.OriginalFilePath, localVideoPath); err != nil {
+			v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download video: %v", err))
+			return err
+		}
+		removeLocalWhenDone = true
 	}
-	defer func() { _ = os.Remove(localVideoPath) }()
+	defer func() {
+		// 仅清理从 S3 下载的临时文件；本地模式（local_path）不删用户文件
+		if removeLocalWhenDone {
+			_ = os.Remove(localVideoPath)
+		}
+	}()
 
 	// 转码视频为HLS格式（使用绝对路径，避免 Windows 下目录“找不到”）
 	outputDir, err := filepath.Abs(filepath.Join(v.tempDir, fmt.Sprintf("hls_%d_%d", fileID, time.Now().Unix())))
@@ -299,17 +327,21 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		return fmt.Errorf("failed to update file: %w", err)
 	}
 
-	// 发送转码文件上传任务消息（失败时删除已上传的 temp）
+	// 发送转码文件上传任务消息（失败时删除已上传的 temp）；本地模式时带上 local_path 供 original_delete 删除本地文件
+	uploadData := map[string]interface{}{
+		"temp_playlist_s3_key": tempPlaylistS3Key,
+		"temp_segment_s3_keys": tempSegmentS3Keys,
+		"output_name":          outputName,
+	}
+	if localPath, ok := msg.Data["local_path"].(string); ok && localPath != "" {
+		uploadData["local_path"] = localPath
+	}
 	uploadMsg := &KafkaMessage{
 		Type:      "transcode_upload",
 		ContentID: file.ContentID,
 		FileID:    fileID,
 		Stage:     string(entity.StageTranscoded),
-		Data: map[string]interface{}{
-			"temp_playlist_s3_key": tempPlaylistS3Key,
-			"temp_segment_s3_keys": tempSegmentS3Keys,
-			"output_name":          outputName,
-		},
+		Data:      uploadData,
 	}
 	if err := v.kafkaService.SendMessage(TopicTranscodeUpload, uploadMsg); err != nil {
 		v.deleteS3Keys("", append([]string{tempPlaylistS3Key}, tempSegmentS3Keys...)...)
@@ -446,15 +478,17 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 		return fmt.Errorf("failed to update file: %w", err)
 	}
 
-	// 发送原始文件删除任务消息（失败时删除已上传的最终 m3u8/ts）
+	// 发送原始文件删除任务消息（失败时删除已上传的最终 m3u8/ts）；本地模式时带上 local_path 以删除本地文件
+	deleteData := map[string]interface{}{"s3_key": file.OriginalFilePath}
+	if localPath, ok := msg.Data["local_path"].(string); ok && localPath != "" {
+		deleteData["local_path"] = localPath
+	}
 	deleteMsg := &KafkaMessage{
 		Type:      "original_delete",
 		ContentID: file.ContentID,
 		FileID:    fileID,
 		Stage:     string(entity.StageTranscodedUploaded),
-		Data: map[string]interface{}{
-			"s3_key": file.OriginalFilePath,
-		},
+		Data:      deleteData,
 	}
 	if err := v.kafkaService.SendMessage(TopicOriginalDelete, deleteMsg); err != nil {
 		v.deleteS3Keys("", append([]string{finalPlaylistS3Key}, segmentS3Keys...)...)
@@ -481,10 +515,13 @@ func (v *VideoProcessorConsumer) handleOriginalDelete(msg *KafkaMessage) error {
 		return nil
 	}
 
-	// 从S3删除原始文件
-	if err := v.s3Service.DeleteFile("", file.OriginalFilePath); err != nil {
-		// 记录错误但不失败（文件可能已经被删除）
-		fmt.Printf("Failed to delete original file %s: %v\n", file.OriginalFilePath, err)
+	// bulk_upload 本地模式：不删除本地文件（保留用户原文件）；否则从 S3 删除
+	if localPath, ok := msg.Data["local_path"].(string); ok && localPath != "" {
+		// 本地模式：跳过删除，保留原文件
+	} else if file.OriginalFilePath != "" && !strings.HasPrefix(file.OriginalFilePath, "local:") {
+		if err := v.s3Service.DeleteFile("", file.OriginalFilePath); err != nil {
+			fmt.Printf("Failed to delete original file %s: %v\n", file.OriginalFilePath, err)
+		}
 	}
 
 	// 更新文件记录

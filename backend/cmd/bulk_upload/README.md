@@ -16,8 +16,14 @@
 
 - **数据库**：`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT`, `DB_SSLMODE`
 - **AWS S3**：`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_S3_BUCKET`
-- **Kafka**：`KAFKA_BROKERS`（如 `localhost:9092`）
+- **Kafka**：`KAFKA_BROKERS`（如 `localhost:9092`）。**多分区**：若希望多个视频并行处理，可将 topic `gif-generation`、`video-transcode` 等创建为多分区（如 4）；消费者已按分区并发消费，每条消息对应不同 file_id，无竞态问题。
 - **FFmpeg / FFprobe**：本进程会启动 Kafka 消费者并执行 GIF 生成与 HLS 转码，需系统 PATH 中有 `ffmpeg` 与 `ffprobe`（或通过 `FFMPEG_PATH` / `FFPROBE_PATH` 指定）。若未安装，工具仍会上传并入队，但需由其他进程（如 backend 服务）消费 Kafka 完成处理。
+
+## 参数说明
+
+- **`-folder`**（必填）：本地视频文件夹路径。
+- **`-local`**：本地模式。不把原视频上传到 S3，直接使用本地路径走 gif/转码流水线；**仅当 Kafka 消费者与本机同一台机器时有效**。可显著加快入队速度并节省 S3 流量；流水线完成后**不删除**本地原文件（保留在磁盘）。
+- **`-workers`**（默认 1）：并发上传/入队数。大于 1 时多文件同时处理，不显示单文件 S3 进度条。
 
 ## 使用方式
 
@@ -29,6 +35,10 @@
 cd backend
 # 指定视频所在文件夹（只处理 .mp4 .mov .webm .avi）
 go run ./cmd/bulk_upload -folder=./videos
+# 本地模式：不上传原文件到 S3，直接走 gif/转码（消费者须在本机）
+go run ./cmd/bulk_upload -folder=./videos -local
+# 多 worker 并发入队（不显示单文件进度条）
+go run ./cmd/bulk_upload -folder=./videos -workers=4
 ```
 
 **Windows CMD / PowerShell：**
