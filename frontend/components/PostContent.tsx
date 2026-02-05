@@ -6,12 +6,12 @@ import {
   fetchCurrentUser,
   getAccessToken,
   getContentById,
+  getContentFilePreviewUrlSameOrigin,
   isInsufficientCreditsError,
   purchaseContent,
   removeBookmark,
   type ContentDetail,
 } from "@/lib/api";
-import { ensureAbsoluteUrl } from "@/lib/metadata";
 import { buildShareUrl } from "@/lib/viewing";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
@@ -61,6 +61,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
   const [canEditContent, setCanEditContent] = useState(false);
   const [canDeleteContent, setCanDeleteContent] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [lockedPreviewFailed, setLockedPreviewFailed] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser().then((user) => {
@@ -104,6 +105,11 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
   useEffect(() => {
     if (data?.content?.bookmarked !== undefined) setBookmarked(data.content.bookmarked);
   }, [data?.content?.bookmarked]);
+
+  // Reset locked preview error when content/files change
+  useEffect(() => {
+    setLockedPreviewFailed(false);
+  }, [data?.content?.id, data?.files]);
 
   // 后端按权限返回 gif_file_url（已购买=正常 GIF，未购买=模糊 GIF），直接使用
   const handlePurchase = useCallback(async () => {
@@ -158,6 +164,19 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
   const purchased = content.purchased || justPurchased;
   const displayName = content.author_username || content.name;
   const avatarInitial = (displayName.charAt(0) || "?").toUpperCase();
+
+  // 未购买时预览：必须用预览流式 API（同源 URL 带 cookie，后端按权限返回模糊/清晰 GIF）
+  const lockedPreviewSrc = firstFile ? getContentFilePreviewUrlSameOrigin(firstFile.id) : undefined;
+  // 未购买时 wrapper 宽高比需与内容一致（竖屏时按 1.5 倍压缩）；无尺寸时不强制，避免横屏被误成竖屏
+  const lockedAspectRatio =
+    firstFile?.width != null &&
+    firstFile?.height != null &&
+    firstFile.width > 0 &&
+    firstFile.height > 0
+      ? firstFile.height > firstFile.width
+        ? (firstFile.width * 1.5) / firstFile.height
+        : firstFile.width / firstFile.height
+      : undefined;
 
   return (
     <>
@@ -294,24 +313,32 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
           </div>
         </div>
 
-        <div className="mt-3 relative w-full rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20 min-h-[200px]">
+        <div
+          className="mt-3 relative w-full rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20 min-h-[200px]"
+          style={
+            !purchased && lockedAspectRatio != null
+              ? { aspectRatio: lockedAspectRatio }
+              : undefined
+          }
+        >
           {purchased && firstFile ? (
             <HlsPlayer
               fileId={firstFile.id}
               contentId={contentId}
               durationSeconds={firstFile.duration}
               className="block w-full h-auto object-contain"
-              poster={ensureAbsoluteUrl(firstFile.gif_file_url) ?? undefined}
+              poster={getContentFilePreviewUrlSameOrigin(firstFile.id)}
               playLabel={t("playVideo")}
               verticalAspectFactor={1.5}
             />
           ) : (
             <>
-              {firstFile?.gif_file_url ? (
+              {lockedPreviewSrc && !lockedPreviewFailed ? (
                 <VerticalAspectImage
-                  src={ensureAbsoluteUrl(firstFile.gif_file_url) ?? firstFile.gif_file_url}
+                  src={lockedPreviewSrc}
                   className="block w-full h-auto object-contain"
                   factor={1.5}
+                  onError={() => setLockedPreviewFailed(true)}
                 />
               ) : (
                 <div className="absolute inset-0 min-h-[200px] flex items-center justify-center">

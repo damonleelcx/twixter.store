@@ -37,6 +37,10 @@ KAFKA_BROKERS=localhost:9092
 FFMPEG_PATH=/usr/local/bin/ffmpeg
 FFPROBE_PATH=/usr/local/bin/ffprobe
 
+# 使用 GPU 加速转码（可选，需 FFmpeg 带 NVENC/CUDA）
+# 设为 1 时使用 NVIDIA h264_nvenc + scale_cuda，可显著加快 HLS 转码
+FFMPEG_USE_GPU=0
+
 # 临时文件目录（可选）
 TEMP_DIR=/tmp/video-processing
 ```
@@ -179,6 +183,15 @@ go run main.go
 ### FFmpeg未找到
 - 检查FFmpeg是否已安装：`ffmpeg -version`
 - 设置`FFMPEG_PATH`环境变量指向FFmpeg可执行文件路径
+
+### GPU 加速（可选）
+
+HLS 转码可使用 **NVIDIA GPU（NVENC）** 加速，显著缩短转码时间：
+
+1. **环境变量**：设置 `FFMPEG_USE_GPU=1`（或在调用 `TranscodeVideo` 时传入 `TranscodeOptions.UseGPU = true`）。
+2. **FFmpeg 要求**：需使用带 NVENC/CUDA 的 FFmpeg 构建（`--enable-nvenc --enable-cuda`）。系统自带的 `apt install ffmpeg` / `apk add ffmpeg` 通常**不包含** NVENC，需自行编译或使用 [NVIDIA 官方容器](https://docs.nvidia.com/video-technologies/video-codec-sdk/ffmpeg-with-nvidia-gpu/)。
+3. **管线**：启用后使用 `-hwaccel cuda` 解码、`scale_cuda` 缩放、`h264_nvenc` 编码；未启用或 GPU 不可用时使用 CPU（libx264）。
+4. **Docker/K8s**：若在容器内使用 GPU，需挂载 NVIDIA 驱动并设置 `NVIDIA_VISIBLE_DEVICES` 等，参考 NVIDIA Container Toolkit。
 
 ### Kafka连接失败
 - 检查Kafka服务器是否运行：`docker ps | grep kafka`

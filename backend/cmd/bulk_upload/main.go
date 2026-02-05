@@ -1,5 +1,5 @@
 // bulk_upload 从本地文件夹读取视频，按与 API 相同的 S3 路径与 Kafka 流程上传并转码。
-// 使用方式: go run backend/cmd/bulk_upload/main.go -folder=./videos
+// 使用方式（须在 backend 目录下）: go run ./cmd/bulk_upload -folder=./videos
 // 需配置 .env: DB_*, AWS_*, KAFKA_BROKERS
 package main
 
@@ -88,6 +88,13 @@ func main() {
 		kafkaService:   kafkaSvc,
 	}
 
+	// 先清理之前遗留的 processing/pending 内容（多半是失败未完成的），再处理新上传
+	if n, err := uploader.cleanupStuckContents(); err != nil {
+		log.Fatalf("清理遗留 processing/pending 内容失败: %v", err)
+	} else if n > 0 {
+		log.Printf("已清理 %d 条遗留的 processing/pending 内容", n)
+	}
+
 	contentIDs, err := uploader.run(*folder)
 	if err != nil {
 		log.Fatalf("批量上传失败: %v", err)
@@ -97,7 +104,19 @@ func main() {
 		return
 	}
 	log.Printf("批量上传完成，共 %d 个视频入队。开始监控处理进度…", len(contentIDs))
-	uploader.monitorUntilDone(contentIDs)
+	retriesLeft := maxRetries - 1
+	for {
+		uploader.monitorUntilDone(contentIDs)
+		failedIDs := uploader.getFailedContentIDs(contentIDs)
+		if len(failedIDs) == 0 || retriesLeft <= 0 {
+			break
+		}
+		log.Printf("重试 %d 个失败项（剩余重试次数 %d）…", len(failedIDs), retriesLeft)
+		if err := uploader.retryFailed(failedIDs); err != nil {
+			log.Printf("重试入队失败: %v", err)
+		}
+		retriesLeft--
+	}
 	log.Println("全部处理完成，退出")
 }
 
@@ -110,7 +129,51 @@ type bulkUploader struct {
 	kafkaService   service.KafkaService
 }
 
-const pollInterval = 15 * time.Second
+const (
+	pollInterval   = 15 * time.Second
+	reportInterval = 60 * time.Second // 详细报告打印间隔
+	maxRetries     = 2                // 单文件最多尝试次数（含首次）
+	cleanupBatch   = 500              // 清理时每批查询条数
+)
+
+// cleanupStuckContents 删除所有 status 为 pending 或 processing 的内容（及其 content_files、content_tags），返回删除条数。
+func (u *bulkUploader) cleanupStuckContents() (int, error) {
+	var toDelete []entity.Content
+	for _, status := range []entity.ContentStatus{entity.ContentStatusPending, entity.ContentStatusProcessing} {
+		for offset := 0; ; offset += cleanupBatch {
+			batch, err := u.contentRepo.GetByStatus(status, cleanupBatch, offset)
+			if err != nil {
+				return 0, fmt.Errorf("查询 %s 内容: %w", status, err)
+			}
+			if len(batch) == 0 {
+				break
+			}
+			toDelete = append(toDelete, batch...)
+		}
+	}
+	if len(toDelete) == 0 {
+		return 0, nil
+	}
+	log.Printf("发现 %d 条遗留的 processing/pending 内容，开始清理…", len(toDelete))
+	deleted := 0
+	for _, c := range toDelete {
+		files, _ := u.fileRepo.GetByContentID(c.ID)
+		for _, f := range files {
+			if err := u.fileRepo.Delete(f.ID); err != nil {
+				log.Printf("清理 content_id=%d file_id=%d 失败: %v", c.ID, f.ID, err)
+				continue
+			}
+		}
+		_ = u.contentTagRepo.RemoveAllTagsFromContent(c.ID)
+		if err := u.contentRepo.Delete(c.ID); err != nil {
+			log.Printf("删除 content_id=%d 失败: %v", c.ID, err)
+			continue
+		}
+		deleted++
+		log.Printf("  已删除 content_id=%d name=%s", c.ID, c.Name)
+	}
+	return deleted, nil
+}
 
 func (u *bulkUploader) run(folder string) ([]uint, error) {
 	// Windows: 未加引号时 shell 会吃掉反斜杠，导致 C:\Users\... 变成 C:Users...，故统一用正斜杠再转成本地路径
@@ -134,7 +197,7 @@ func (u *bulkUploader) run(folder string) ([]uint, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取文件夹 %s: %w", folder, err)
 	}
-	var contentIDs []uint
+	var videoPaths []string
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -144,22 +207,34 @@ func (u *bulkUploader) run(folder string) ([]uint, error) {
 		if _, ok := videoExts[ext]; !ok {
 			continue
 		}
-		path := filepath.Join(folder, base)
+		videoPaths = append(videoPaths, filepath.Join(folder, base))
+	}
+	total := len(videoPaths)
+	if total == 0 {
+		return nil, nil
+	}
+	log.Printf("发现 %d 个视频文件，开始逐个处理…", total)
+	var contentIDs []uint
+	for i, path := range videoPaths {
+		base := filepath.Base(path)
+		ext := strings.ToLower(filepath.Ext(base))
+		log.Printf("[%d/%d] %s: 创建内容 -> 上传S3 -> 入队", i+1, total, base)
 		cid, err := u.uploadOne(path, base, ext)
 		if err != nil {
-			log.Printf("跳过 %s: %v", base, err)
+			log.Printf("  -> 跳过: %v", err)
 			continue
 		}
 		contentIDs = append(contentIDs, cid)
-		log.Printf("已入队: %s", base)
+		log.Printf("  -> 完成，content_id=%d", cid)
 	}
 	return contentIDs, nil
 }
 
-// monitorUntilDone 轮询直到本批所有内容的 status 为 ready 或 failed
+// monitorUntilDone 轮询直到本批所有内容的 status 为 ready 或 failed；每 reportInterval 打印详细报告
 func (u *bulkUploader) monitorUntilDone(contentIDs []uint) {
 	total := len(contentIDs)
 	lastReady, lastFailed, lastProcessing := -1, -1, -1
+	lastReport := time.Now()
 	for {
 		ready, processing, failed := 0, 0, 0
 		for _, cid := range contentIDs {
@@ -181,11 +256,112 @@ func (u *bulkUploader) monitorUntilDone(contentIDs []uint) {
 			log.Printf("[监控] ready=%d, processing=%d, failed=%d (共 %d)", ready, processing, failed, total)
 			lastReady, lastFailed, lastProcessing = ready, failed, processing
 		}
+		if time.Since(lastReport) >= reportInterval {
+			u.printDetailedReport(contentIDs)
+			lastReport = time.Now()
+		}
 		if ready+failed == total {
 			return
 		}
 		time.Sleep(pollInterval)
 	}
+}
+
+// printDetailedReport 打印本批每个内容的详细状态（content_id, name, status, file_stage, error）
+func (u *bulkUploader) printDetailedReport(contentIDs []uint) {
+	log.Println("---------- 详细上传报告 ----------")
+	for _, cid := range contentIDs {
+		c, err := u.contentRepo.GetByID(cid)
+		if err != nil {
+			log.Printf("  [%d] 查询失败: %v", cid, err)
+			continue
+		}
+		files, _ := u.fileRepo.GetByContentID(cid)
+		fileStage := "-"
+		fileErr := ""
+		if len(files) > 0 {
+			f := files[0]
+			fileStage = string(f.Stage)
+			if f.ProcessingError != "" {
+				fileErr = f.ProcessingError
+				if len(fileErr) > 80 {
+					fileErr = fileErr[:77] + "..."
+				}
+			}
+		}
+		log.Printf("  [%d] %s | content=%s | file_stage=%s | %s", cid, c.Name, c.Status, fileStage, fileErr)
+	}
+	log.Println("----------------------------------")
+}
+
+// getFailedContentIDs 返回本批中状态为 failed 的内容 ID 列表
+func (u *bulkUploader) getFailedContentIDs(contentIDs []uint) []uint {
+	var out []uint
+	for _, cid := range contentIDs {
+		c, err := u.contentRepo.GetByID(cid)
+		if err != nil {
+			continue
+		}
+		if c.Status == entity.ContentStatusFailed {
+			out = append(out, cid)
+		}
+	}
+	return out
+}
+
+// retryFailed 将失败项清理并重新入队：重置文件为 uploaded、内容为 processing，重新发送 Kafka gif_generation（衍生资源已在 consumer 失败时清理）
+func (u *bulkUploader) retryFailed(contentIDs []uint) error {
+	for _, cid := range contentIDs {
+		content, err := u.contentRepo.GetByID(cid)
+		if err != nil {
+			log.Printf("重试 [%d]: 获取内容失败 %v", cid, err)
+			continue
+		}
+		files, err := u.fileRepo.GetByContentID(cid)
+		if err != nil || len(files) == 0 {
+			log.Printf("重试 [%d]: 无文件记录", cid)
+			continue
+		}
+		for _, f := range files {
+			f.GifFilePath = ""
+			f.GifFileURL = ""
+			f.GifFileSize = 0
+			f.GifBlurFilePath = ""
+			f.GifBlurFileURL = ""
+			f.GifBlurFileSize = 0
+			f.TranscodedFilePath = ""
+			f.TranscodedFileURL = ""
+			f.TranscodedFileSize = 0
+			f.Stage = entity.StageUploaded
+			f.ProcessingError = ""
+			f.ProcessedAt = nil
+			if err := u.fileRepo.Update(f); err != nil {
+				log.Printf("重试 [%d] file %d: 更新文件失败 %v", cid, f.ID, err)
+				continue
+			}
+			content.Status = entity.ContentStatusProcessing
+			if err := u.contentRepo.Update(content); err != nil {
+				log.Printf("重试 [%d]: 更新内容失败 %v", cid, err)
+				continue
+			}
+			msg := &service.KafkaMessage{
+				Type:      "gif_generation",
+				ContentID: content.ID,
+				FileID:    f.ID,
+				Stage:     string(entity.StageUploaded),
+				Data: map[string]interface{}{
+					"s3_key":   f.OriginalFilePath,
+					"file_url": f.OriginalFileURL,
+				},
+			}
+			if err := u.kafkaService.SendMessage(service.TopicGifGeneration, msg); err != nil {
+				log.Printf("重试 [%d]: 发送 Kafka 失败 %v", cid, err)
+				continue
+			}
+			log.Printf("重试入队: content_id=%d, file_id=%d", cid, f.ID)
+		}
+	}
+	return nil
 }
 
 // parseNameAndTags 从文件名解析显示名和标签（如 summer_beach_fun.mp4 -> "Summer Beach Fun", ["summer","beach","fun"]）

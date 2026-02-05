@@ -5,11 +5,11 @@ import {
   deleteContent,
   fetchCurrentUser,
   getAccessToken,
-  getApiBase,
+  getContentFilePreviewUrl,
   isInsufficientCreditsError,
   purchaseContent,
   removeBookmark,
-  type ContentFeedItem,
+  type ContentFeedItem
 } from "@/lib/api";
 import { ensureAbsoluteUrl } from "@/lib/metadata";
 import { buildShareUrl } from "@/lib/viewing";
@@ -95,13 +95,40 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
     [item, locale, onPurchased, purchasing, router]
   );
 
-  // 后端按权限返回 preview_gif_url（已购买=正常 GIF，未购买=模糊 GIF），直接使用
-  const previewSrc = ensureAbsoluteUrl(item.preview_gif_url);
+  // 通过后端流式接口加载预览：已购买返回原图，未购买返回模糊 GIF；同源请求会带 cookie 鉴权
+  const previewSrc =
+    item.first_file_id
+      ? getContentFilePreviewUrl(item.first_file_id)
+      : ensureAbsoluteUrl(item.preview_gif_url);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  // 仅占位（无图或加载失败）时用 API 宽高比或默认 9:16，有图时由图片自身高度决定
+  const apiAspectRatio =
+    item.preview_width != null &&
+    item.preview_height != null &&
+    item.preview_width > 0 &&
+    item.preview_height > 0
+      ? item.preview_width / item.preview_height
+      : null;
+  const DEFAULT_PREVIEW_ASPECT = 9 / 16;
+  // 有 API 尺寸时 wrapper 与内容一致（竖屏按 1.5 倍压缩）；无尺寸时不强制宽高比，避免横屏被误成竖屏
+  const baseAspect = apiAspectRatio ?? null;
+  const previewAspectRatio =
+    baseAspect != null
+      ? baseAspect < 1
+        ? baseAspect * 1.5
+        : baseAspect
+      : null;
+  const effectivePreviewSrc = previewFailed ? undefined : previewSrc;
 
   // Sync bookmarked from server when item.bookmarked is present
   useEffect(() => {
     if (item.bookmarked !== undefined) setBookmarked(item.bookmarked);
   }, [item.bookmarked]);
+
+  // Reset preview state when item or preview URL changes
+  useEffect(() => {
+    setPreviewFailed(false);
+  }, [item.id, item.first_file_id, item.preview_gif_url]);
 
   return (
     <article className="block border-b border-[var(--border)] transition-colors hover:bg-[var(--hover)]">
@@ -244,21 +271,29 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
         </button>
       </div>
       <div className="px-4 pb-3">
-        <div className="mt-2 relative w-full rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20 min-h-[200px]">
+        <div
+          className="mt-2 relative w-full rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--muted)]/20"
+          style={
+            previewAspectRatio != null
+              ? { aspectRatio: previewAspectRatio }
+              : { minHeight: 200 }
+          }
+        >
           {item.purchased && item.first_file_id ? (
             <HlsPlayer
               fileId={item.first_file_id}
               contentId={item.id}
               className="block w-full h-auto object-contain"
-              poster={previewSrc ?? undefined}
+              poster={effectivePreviewSrc ?? undefined}
               playLabel={tPost("playVideo")}
               verticalAspectFactor={1.5}
             />
-          ) : previewSrc ? (
+          ) : effectivePreviewSrc ? (
             <VerticalAspectImage
-              src={previewSrc}
+              src={effectivePreviewSrc}
               className="block w-full h-auto object-contain"
               factor={1.5}
+              onError={() => setPreviewFailed(true)}
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center min-h-[200px]">

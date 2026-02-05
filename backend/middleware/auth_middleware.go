@@ -9,6 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// AuthTokenCookieName 与前端 AUTH_TOKEN_COOKIE 一致，用于 GET 请求（如 img src 预览）带 cookie 时识别登录用户
+const AuthTokenCookieName = "twixter_token"
+
 // AuthMiddleware Authentication middleware
 func AuthMiddleware(authService service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -77,24 +80,21 @@ func AuthMiddleware(authService service.AuthService) gin.HandlerFunc {
 	}
 }
 
-// OptionalAuthMiddleware Optional authentication middleware (doesn't fail if no token)
+// OptionalAuthMiddleware Optional authentication middleware (doesn't fail if no token).
+// 先读 Authorization 头，若无则读 cookie twixter_token，以便 GET 请求（如 img src 预览）带 cookie 时能识别会员/已购买并返回正常 GIF。
 func OptionalAuthMiddleware(authService service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get token from Authorization header
+		token := ""
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.Next()
-			return
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" && parts[1] != "" {
+				token = parts[1]
+			}
 		}
-
-		// Check if it's a Bearer token
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.Next()
-			return
+		if token == "" {
+			token, _ = c.Cookie(AuthTokenCookieName)
 		}
-
-		token := parts[1]
 		if token == "" {
 			c.Next()
 			return
