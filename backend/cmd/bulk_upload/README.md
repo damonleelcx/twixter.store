@@ -21,14 +21,26 @@
 
 ## 使用方式
 
-在仓库根目录或 backend 目录下执行：
+**必须在 `backend` 目录下执行**（因 `go.mod` 在此目录，包路径为 `backend/...`）。在仓库根目录直接 `go run backend/...` 会报 “package backend/config is not in std” 或 “go.mod file not found”。
+
+**Bash (Git Bash / WSL / Linux / macOS)：**
 
 ```bash
+cd backend
 # 指定视频所在文件夹（只处理 .mp4 .mov .webm .avi）
-go run backend/cmd/bulk_upload/main.go -folder=./videos
+go run ./cmd/bulk_upload -folder=./videos
+```
+
+**Windows CMD / PowerShell：**
+
+```cmd
+cd backend
+go run .\cmd\bulk_upload -folder=.\videos
 ```
 
 或先编译再运行：
+
+**Bash：**
 
 ```bash
 cd backend
@@ -36,15 +48,35 @@ go build -o bulk_upload ./cmd/bulk_upload/
 ./bulk_upload -folder=/path/to/videos
 ```
 
+**Windows CMD：**
+
+```cmd
+cd backend
+go build -o bulk_upload.exe .\cmd\bulk_upload\
+bulk_upload.exe -folder=C:\path\to\videos
+```
+
 未指定 `-folder` 会报错并退出。**文件夹必须已存在**：若使用 `./videos`，请先创建并放入视频：
 
+**Bash：**
+
 ```bash
-mkdir videos
+cd backend
+mkdir -p videos
 # 将 .mp4 / .mov / .webm / .avi 放入 videos 目录后再运行
-go run backend/cmd/bulk_upload/main.go -folder=./videos
+go run ./cmd/bulk_upload -folder=./videos
+```
+
+**Windows CMD：**
+
+```cmd
+cd backend
+mkdir videos
+REM 将 .mp4 / .mov / .webm / .avi 放入 videos 目录后再运行
+go run .\cmd\bulk_upload -folder=.\videos
 ```
 
 也可用绝对路径指定已有视频目录。**在 Git Bash / WSL 等 Bash 下，请用正斜杠**，否则 `\` 会被转义导致路径错误：
 
-- 推荐：`-folder=C:/Users/damon/Downloads/videos`
-- 或在 CMD 下加引号：`-folder="C:\Users\damon\Downloads\videos"`
+- Bash 推荐：`-folder=C:/Users/damon/Downloads/videos`
+- CMD 推荐（路径含空格时加引号）：`-folder="C:\Users\damon\Downloads\videos"`

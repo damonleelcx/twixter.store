@@ -245,6 +245,7 @@ func (cc *ContentController) GetContent(c *gin.Context) {
 		return
 	}
 
+	// purchased = 可观看（已购买该内容或有效会员），用于返回正常/模糊 GIF 与前端展示
 	purchased := false
 	bookmarked := false
 	if user, exists := middleware.GetUserFromContext(c); exists {
@@ -252,7 +253,7 @@ func (cc *ContentController) GetContent(c *gin.Context) {
 		bookmarked, _ = cc.contentService.IsBookmarked(user.ID, content.ID)
 	}
 
-	// 按权限返回 gif_file_url：已购买为正常 GIF，未购买为模糊 GIF
+	// 按可观看权限返回 gif_file_url：可观看为正常 GIF，不可观看为模糊 GIF
 	fileResponses := make([]gin.H, 0, len(files))
 	for _, file := range files {
 		gifURL := file.GifFileURL
@@ -539,7 +540,7 @@ func (cc *ContentController) ListBookmarks(c *gin.Context) {
 	})
 }
 
-// StreamGifPreview 流式返回 GIF 预览：已购买返回原图，未购买返回后端模糊后的 JPEG
+// StreamGifPreview 流式返回 GIF 预览：可观看（已购买或有效会员）返回原图，否则返回模糊 GIF
 func (cc *ContentController) StreamGifPreview(c *gin.Context) {
 	fileIDStr := c.Param("file_id")
 	fileID, err := strconv.ParseUint(fileIDStr, 10, 32)

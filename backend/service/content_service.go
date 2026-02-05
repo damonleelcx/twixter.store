@@ -64,7 +64,7 @@ type ContentService interface {
 	// ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部
 	ListFeedSearch(q string, category string, userID uint, limit, offset int) ([]ListFeedItem, error)
 
-	// GetGifPreview 返回 GIF 预览：已购买则流式返回正常 GIF；未购买则流式返回上传时生成的模糊 GIF
+	// GetGifPreview 返回 GIF 预览：可观看（已购买或有效会员）则流式返回正常 GIF，否则返回模糊 GIF
 	GetGifPreview(fileID uint, userID uint) (body io.ReadCloser, contentType string, err error)
 
 	// GetAuthorForUserID 根据上传者 ID 返回作者用户名和头像 URL（用于帖子详情等）
@@ -93,15 +93,17 @@ type ContentService interface {
 
 // ListFeedItem feed 列表单项（含作者、时间戳、标签，Twitter 风格）
 // PreviewGifURL 按权限返回：已购买为正常 GIF URL，未购买为模糊 GIF URL（上传时生成）
-	type ListFeedItem struct {
-		ID               uint     `json:"id"`
-		Name             string   `json:"name"`
-		Description      string   `json:"description"`
-		Category         string   `json:"category"`
-		Price            float64  `json:"price"`
-		PreviewGifURL    string   `json:"preview_gif_url"`
-		PreviewGifBase64 string   `json:"preview_gif_base64,omitempty"` // 保留兼容，不再使用
+type ListFeedItem struct {
+	ID               uint     `json:"id"`
+	Name             string   `json:"name"`
+	Description      string   `json:"description"`
+	Category         string   `json:"category"`
+	Price            float64  `json:"price"`
+	PreviewGifURL    string   `json:"preview_gif_url"`
+	PreviewGifBase64 string   `json:"preview_gif_base64,omitempty"` // 保留兼容，不再使用
 	FirstFileID      uint     `json:"first_file_id"`
+	PreviewWidth     int      `json:"preview_width,omitempty"`  // 首文件宽，用于前端正确宽高比
+	PreviewHeight    int      `json:"preview_height,omitempty"` // 首文件高
 	Purchased        bool     `json:"purchased"`
 	Bookmarked       bool     `json:"bookmarked,omitempty"`
 	CreatedAt        string   `json:"created_at"`
@@ -669,12 +671,19 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 			purchased, _ = s.UserCanViewContent(userID, c.ID)
 			bookmarked, _ = s.contentBookmarkRepo.Exists(userID, c.ID)
 		}
-		// 已购买用正常 GIF URL，未购买用上传时生成的模糊 GIF URL
+		// 已购买用正常 GIF URL，未购买用上传时生成的模糊 GIF URL；两者都空时用内容缩略图兜底
 		previewGif := first.GifFileURL
 		if !purchased && first.GifBlurFileURL != "" {
 			previewGif = first.GifBlurFileURL
 		}
+		if previewGif == "" && c.ThumbnailURL != "" {
+			previewGif = c.ThumbnailURL
+		}
 		tagNames, _ := s.GetContentTagNames(c.ID)
+		previewW, previewH := 0, 0
+		if first.Width != nil && first.Height != nil && *first.Width > 0 && *first.Height > 0 {
+			previewW, previewH = *first.Width, *first.Height
+		}
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -683,6 +692,8 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 			Price:          c.Price,
 			PreviewGifURL:  previewGif,
 			FirstFileID:    first.ID,
+			PreviewWidth:   previewW,
+			PreviewHeight:  previewH,
 			Purchased:      purchased,
 			Bookmarked:     bookmarked,
 			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
@@ -807,6 +818,10 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 		first := files[0]
 		bookmarked := true
 		tagNames, _ := s.GetContentTagNames(c.ID)
+		previewW, previewH := 0, 0
+		if first.Width != nil && first.Height != nil && *first.Width > 0 && *first.Height > 0 {
+			previewW, previewH = *first.Width, *first.Height
+		}
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -815,6 +830,8 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 			Price:          c.Price,
 			PreviewGifURL:  first.GifFileURL,
 			FirstFileID:    first.ID,
+			PreviewWidth:   previewW,
+			PreviewHeight:  previewH,
 			Purchased:      true,
 			Bookmarked:     bookmarked,
 			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
@@ -890,7 +907,7 @@ func (s *contentService) ListBookmarkedContent(userID uint, limit, offset int) (
 	return s.buildListFeedItems(contents, userID)
 }
 
-// GetGifPreview 返回 GIF 预览：已购买则流式返回正常 GIF；未购买则流式返回上传时生成的模糊 GIF
+// GetGifPreview 返回 GIF 预览：可观看（已购买或有效会员）则流式返回正常 GIF，否则返回模糊 GIF
 func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser, string, error) {
 	file, err := s.fileRepo.GetByID(fileID)
 	if err != nil {
@@ -925,4 +942,3 @@ func (s *contentService) GetGifPreview(fileID uint, userID uint) (io.ReadCloser,
 	}
 	return reader, contentType, nil
 }
-

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/disintegration/imaging"
 )
@@ -44,11 +46,12 @@ type HLSOutput struct {
 
 // TranscodeOptions 转码选项
 type TranscodeOptions struct {
-	Codec      string // 视频编码器 (h264, h265, vp9等)
+	Codec      string // 视频编码器 (libx264, h264_nvenc 等)
 	Bitrate    string // 比特率 (如: 2000k)
 	Resolution string // 分辨率 (如: 1920x1080)
 	Format     string // 输出格式 (mp4, webm等)
-	Quality    string // 质量预设 (如: medium, high)
+	Quality    string // 质量预设：CPU 为 x264 preset(medium等)，NVENC 为 p1-p7(p4 平衡)
+	UseGPU     bool   // 为 true 时使用 GPU 加速（NVIDIA NVENC），需 FFmpeg 带 --enable-nvenc
 }
 
 // VideoInfo 视频信息
@@ -175,12 +178,13 @@ func (v *videoProcessingService) GenerateGifSampled(videoPath, outputPath string
 	// 单命令：split -> 一路 palettegen，一路 scale -> paletteuse，直接输出 GIF
 	filterComplex := fmt.Sprintf("split[s0][s1];[s0]fps=%s,scale=320:-1:flags=lanczos,palettegen=stats_mode=single[p];[s1]fps=%s,scale=320:-1:flags=lanczos[x];[x][p]paletteuse=new=1", fpsArg, fpsArg)
 
+	// Windows 下传给 FFmpeg 的路径用正斜杠，避免反斜杠被转义导致输出到错误位置
 	cmd := exec.Command(v.ffmpegPath,
 		"-t", fmt.Sprintf("%.2f", duration),
-		"-i", videoPath,
+		"-i", toFFmpegPath(videoPath),
 		"-filter_complex", filterComplex,
 		"-y",
-		outputPath,
+		toFFmpegPath(outputPath),
 	)
 	stderr := &bytes.Buffer{}
 	cmd.Stderr = stderr
@@ -234,8 +238,29 @@ func ensureDisposalLen(d []byte, n int) []byte {
 
 // BlurGif 从本地 GIF 文件生成模糊版并写入 outputPath
 func (v *videoProcessingService) BlurGif(inputPath, outputPath string) error {
-	data, err := os.ReadFile(inputPath)
+	// 统一为绝对路径，避免 Windows 下工作目录/相对路径导致找不到文件
+	absInput, err := filepath.Abs(inputPath)
 	if err != nil {
+		absInput = inputPath
+	}
+	// Windows 下 FFmpeg 刚写完文件时可能尚未可见，短暂重试
+	const readRetries = 5
+	const readRetryDelay = 300 * time.Millisecond
+	var data []byte
+	for i := 0; i < readRetries; i++ {
+		data, err = os.ReadFile(absInput)
+		if err == nil {
+			break
+		}
+		errStr := err.Error()
+		retryable := errors.Is(err, os.ErrNotExist) ||
+			strings.Contains(errStr, "cannot find the file") ||
+			strings.Contains(errStr, "no such file") ||
+			strings.Contains(errStr, "The system cannot find the file specified")
+		if i < readRetries-1 && retryable {
+			time.Sleep(readRetryDelay)
+			continue
+		}
 		return fmt.Errorf("read gif: %w", err)
 	}
 	img, err := gif.DecodeAll(bytes.NewReader(data))
@@ -298,9 +323,15 @@ func (v *videoProcessingService) BlurGif(inputPath, outputPath string) error {
 
 // TranscodeVideo 转码视频为HLS格式（.m3u8 + .ts 分片）
 func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName string, options *TranscodeOptions) (*HLSOutput, error) {
-	// 确保输出目录存在
+	// 规范为绝对路径，避免 Windows 下相对路径或不同写法导致目录“找不到”
+	absOutputDir, err := filepath.Abs(filepath.Clean(outputDir))
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve output directory: %w", err)
+	}
+	outputDir = absOutputDir
+	// 确保输出目录存在（含父目录）
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create output directory: %w", err)
+		return nil, fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
 	}
 
 	// 默认转码选项（x264 preset 须为 ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|placebo，不能用 high）
@@ -310,7 +341,7 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 			Bitrate:    "2000k",
 			Resolution: "1920x1080", // 默认转码到 1080p
 			Format:     "hls",
-			Quality:    "medium",    // x264 preset：medium 平衡速度与质量
+			Quality:    "medium", // x264 preset：medium 平衡速度与质量
 		}
 	}
 
@@ -319,41 +350,80 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 		options.Resolution = "1920x1080"
 	}
 
+	// 是否使用 GPU：显式设置或环境变量 FFMPEG_USE_GPU=1
+	useGPU := options.UseGPU
+	if !useGPU && os.Getenv("FFMPEG_USE_GPU") == "1" {
+		useGPU = true
+	}
+
 	// 构建输出路径
 	playlistPath := filepath.Join(outputDir, outputName+".m3u8")
 	segmentPattern := filepath.Join(outputDir, outputName+"_%03d.ts")
 
-	// 构建FFmpeg命令用于HLS转码
-	args := []string{
-		"-i", inputPath,
-		"-c:v", options.Codec,
-		"-preset", options.Quality,
-	}
-
-	// 添加比特率
-	if options.Bitrate != "" {
-		args = append(args, "-b:v", options.Bitrate)
-	}
-
-	// 总是添加分辨率缩放（保持宽高比）；使用 -2 保证宽高为偶数（libx264 要求）
-	resolutionParts := strings.Split(options.Resolution, "x")
-	if len(resolutionParts) == 2 {
-		args = append(args, "-vf", fmt.Sprintf("scale=%s:-2", resolutionParts[0]))
+	var args []string
+	if useGPU {
+		// GPU 管线：CUDA 解码 + scale_cuda + h264_nvenc（需 FFmpeg 编译时启用 nvenc/cuda）
+		codec := options.Codec
+		if codec == "" || codec == "libx264" {
+			codec = "h264_nvenc"
+		}
+		quality := options.Quality
+		if quality == "" || quality == "medium" {
+			quality = "p4" // NVENC p1(最快)..p7(最慢/质量最好)
+		}
+		args = []string{
+			"-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+			"-i", toFFmpegPath(inputPath),
+			"-c:v", codec,
+			"-preset", quality,
+		}
+		if options.Bitrate != "" {
+			args = append(args, "-b:v", options.Bitrate)
+		}
+		resolutionParts := strings.Split(options.Resolution, "x")
+		scaleArg := "1920:-2"
+		if len(resolutionParts) == 2 {
+			scaleArg = resolutionParts[0] + ":-2"
+		}
+		// scale_cuda 保持宽高比；-2 保证偶数
+		args = append(args, "-vf", "scale_cuda="+scaleArg)
 	} else {
-		args = append(args, "-vf", "scale=1920:-2")
+		// 原有 CPU 管线：libx264
+		codec := options.Codec
+		if codec == "" {
+			codec = "libx264"
+		}
+		quality := options.Quality
+		if quality == "" {
+			quality = "medium"
+		}
+		args = []string{
+			"-i", toFFmpegPath(inputPath),
+			"-c:v", codec,
+			"-preset", quality,
+		}
+		if options.Bitrate != "" {
+			args = append(args, "-b:v", options.Bitrate)
+		}
+		resolutionParts := strings.Split(options.Resolution, "x")
+		if len(resolutionParts) == 2 {
+			args = append(args, "-vf", fmt.Sprintf("scale=%s:-2", resolutionParts[0]))
+		} else {
+			args = append(args, "-vf", "scale=1920:-2")
+		}
 	}
 
 	// 音频编码
 	args = append(args, "-c:a", "aac", "-b:a", "128k")
 
-	// HLS 特定参数
+	// HLS 特定参数（路径统一转成 FFmpeg 可识别的形式，避免 Windows 反斜杠问题）
 	args = append(args,
 		"-hls_time", "10", // 每个分片10秒
 		"-hls_list_size", "0", // 0表示包含所有分片
-		"-hls_segment_filename", segmentPattern, // 分片文件命名模式
+		"-hls_segment_filename", toFFmpegPath(segmentPattern), // 分片文件命名模式
 		"-hls_flags", "independent_segments", // 独立分片标志
 		"-y",
-		playlistPath, // 输出 .m3u8 播放列表
+		toFFmpegPath(playlistPath), // 输出 .m3u8 播放列表
 	)
 
 	cmd := exec.Command(v.ffmpegPath, args...)
@@ -373,6 +443,13 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 		return nil, fmt.Errorf("failed to transcode video to HLS: %w", err)
 	}
 
+	// 转码后确认输出目录仍存在（Windows 下路径不一致或目录未创建时便于排查）
+	if fi, err := os.Stat(outputDir); err != nil {
+		return nil, fmt.Errorf("output directory missing after ffmpeg (path: %s): %w", outputDir, err)
+	} else if !fi.IsDir() {
+		return nil, fmt.Errorf("output path is not a directory: %s", outputDir)
+	}
+
 	// 查找所有生成的 .ts 分片文件
 	segmentPaths, err := v.findSegmentFiles(outputDir, outputName)
 	if err != nil {
@@ -388,9 +465,10 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 
 // findSegmentFiles 查找所有生成的 .ts 分片文件
 func (v *videoProcessingService) findSegmentFiles(outputDir, outputName string) ([]string, error) {
-	files, err := ioutil.ReadDir(outputDir)
+	dir := filepath.Clean(outputDir)
+	files, err := ioutil.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read output dir %s: %w", dir, err)
 	}
 
 	var segmentPaths []string
@@ -401,7 +479,7 @@ func (v *videoProcessingService) findSegmentFiles(outputDir, outputName string) 
 		if !file.IsDir() {
 			name := file.Name()
 			if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix) {
-				segmentPaths = append(segmentPaths, filepath.Join(outputDir, name))
+				segmentPaths = append(segmentPaths, filepath.Join(dir, name))
 			}
 		}
 	}

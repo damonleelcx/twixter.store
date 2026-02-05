@@ -390,11 +390,15 @@ export type ContentFeedItem = {
   description: string;
   category: string;
   price: number;
-  /** 按权限返回：已购买为正常 GIF URL，未购买为模糊 GIF URL（上传时生成） */
+  /** 按可观看权限返回：可观看为正常 GIF URL，不可观看为模糊 GIF URL（流式 preview 同） */
   preview_gif_url: string;
   /** @deprecated 后端不再预取 base64，保留兼容 */
   preview_gif_base64?: string;
   first_file_id: number;
+  /** 首文件宽高，用于预览区正确宽高比（后端从转码视频取） */
+  preview_width?: number;
+  preview_height?: number;
+  /** 可观看：已购买该内容或有效会员时为 true，此时可看正常 GIF/视频 */
   purchased: boolean;
   bookmarked?: boolean;
   created_at: string;
@@ -414,13 +418,14 @@ export type ContentDetail = {
     category: string;
     price: number;
     created_at: string;
+    /** 可观看：已购买该内容或有效会员时为 true，此时可看正常 GIF/视频 */
     purchased: boolean;
     bookmarked?: boolean;
     author_username?: string;
     author_avatar?: string;
     tags?: string[];
   };
-  /** 按权限返回：已购买为正常 GIF URL，未购买为模糊 GIF URL */
+  /** 按可观看权限返回：可观看为正常 GIF URL，不可观看为模糊 GIF URL（流式 preview 接口同） */
   files: Array<{
     id: number;
     file_name: string;
@@ -434,6 +439,17 @@ export type ContentDetail = {
     duration?: number;
   }>;
 };
+
+/** URL for GIF preview stream: backend streams blur or clear GIF by auth. Use in <img src> (cookies sent same-origin). */
+export function getContentFilePreviewUrl(fileId: number): string {
+  return `${getApiBase()}/content/files/${fileId}/preview`;
+}
+
+/** Same-origin preview URL for <img src> so browser sends cookies (e.g. when API is on another port). */
+export function getContentFilePreviewUrlSameOrigin(fileId: number): string {
+  if (typeof window !== "undefined") return `/api/content/files/${fileId}/preview`;
+  return getContentFilePreviewUrl(fileId);
+}
 
 /** Get content by id. Auth or viewing_dark cookie for dark. Optional viewing param for unauthenticated dark access. */
 export async function getContentById(

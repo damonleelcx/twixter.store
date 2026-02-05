@@ -4,11 +4,14 @@ import (
 	"backend/entity"
 	"backend/repository"
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // VideoProcessorConsumer 视频处理消费者
@@ -73,9 +76,12 @@ func (v *VideoProcessorConsumer) Start() error {
 func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 	fileID := msg.FileID
 
-	// 获取文件记录
+	// 获取文件记录（不存在则跳过，多为历史/过期消息）
 	file, err := v.fileRepo.GetByID(fileID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
@@ -112,25 +118,27 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 	}
 	defer func() { _ = os.Remove(localGifPath) }()
 
-	// 上传前获取GIF文件大小（上传后 S3 服务会删除本地文件）
+	// 使用绝对路径，避免不同进程/工作目录导致 BlurGif 读不到文件（如 C:\Users\...\files\gif_xxx.gif 找不到）
+	localGifPathAbs, err := filepath.Abs(localGifPath)
+	if err != nil {
+		localGifPathAbs = localGifPath
+	}
+	if _, err := os.Stat(localGifPathAbs); err != nil {
+		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("GIF file missing before blur (path %s): %v", localGifPathAbs, err))
+		return err
+	}
+	// Windows 下 FFmpeg 刚退出时文件句柄可能尚未释放，稍等再读（BlurGif 内也有重试）
+	time.Sleep(100 * time.Millisecond)
+	// 上传前获取GIF文件大小（上传后 S3 会删除本地文件，故先取大小）
 	gifFileSize := int64(0)
-	if gifFileInfo, err := os.Stat(localGifPath); err == nil {
+	if gifFileInfo, err := os.Stat(localGifPathAbs); err == nil {
 		gifFileSize = gifFileInfo.Size()
 	}
 
-	// 上传正常 GIF 到 S3
-	gifS3Key := fmt.Sprintf("gifs/%d/%d_%d.gif", file.ContentID, fileID, time.Now().Unix())
-	gifURL, err := v.s3Service.UploadFileFromPath("", gifS3Key, localGifPath, "image/gif")
-	if err != nil {
-		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload GIF: %v", err))
-		return err
-	}
-
-	// 生成模糊 GIF 并上传（上传阶段一次生成，获取时按权限直接返回）
+	// 先生成模糊 GIF（BlurGif 需读取本地清晰 GIF；UploadFileFromPath 上传后会删除本地文件，故必须在第一次上传前完成）
 	localGifBlurPath := filepath.Join(v.tempDir, fmt.Sprintf("gif_blur_%d_%d.gif", fileID, time.Now().Unix()))
-	if err := v.videoProcessingService.BlurGif(localGifPath, localGifBlurPath); err != nil {
+	if err := v.videoProcessingService.BlurGif(localGifPathAbs, localGifBlurPath); err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to generate blur GIF: %v", err))
-		_ = v.s3Service.DeleteFile("", gifS3Key)
 		return err
 	}
 	defer func() { _ = os.Remove(localGifBlurPath) }()
@@ -139,11 +147,19 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 	if fi, err := os.Stat(localGifBlurPath); err == nil {
 		gifBlurFileSize = fi.Size()
 	}
+
+	// 上传正常 GIF 到 S3（上传后本地文件会被删除）
+	gifS3Key := fmt.Sprintf("gifs/%d/%d_%d.gif", file.ContentID, fileID, time.Now().Unix())
+	gifURL, err := v.s3Service.UploadFileFromPath("", gifS3Key, localGifPath, "image/gif")
+	if err != nil {
+		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload GIF: %v", err), gifS3Key)
+		return err
+	}
+
 	gifBlurS3Key := fmt.Sprintf("gifs/%d/%d_%d_blur.gif", file.ContentID, fileID, time.Now().Unix())
 	gifBlurURL, err := v.s3Service.UploadFileFromPath("", gifBlurS3Key, localGifBlurPath, "image/gif")
 	if err != nil {
-		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload blur GIF: %v", err))
-		_ = v.s3Service.DeleteFile("", gifS3Key)
+		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload blur GIF: %v", err), gifS3Key, gifBlurS3Key)
 		return err
 	}
 
@@ -190,9 +206,12 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 	fileID := msg.FileID
 
-	// 获取文件记录
+	// 获取文件记录（不存在则跳过，多为历史/过期消息）
 	file, err := v.fileRepo.GetByID(fileID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
@@ -209,16 +228,21 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 	}
 	defer func() { _ = os.Remove(localVideoPath) }()
 
-	// 转码视频为HLS格式
-	outputDir := filepath.Join(v.tempDir, fmt.Sprintf("hls_%d_%d", fileID, time.Now().Unix()))
+	// 转码视频为HLS格式（使用绝对路径，避免 Windows 下目录“找不到”）
+	outputDir, err := filepath.Abs(filepath.Join(v.tempDir, fmt.Sprintf("hls_%d_%d", fileID, time.Now().Unix())))
+	if err != nil {
+		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to resolve HLS output dir: %v", err))
+		return err
+	}
 	outputName := fmt.Sprintf("playlist_%d", fileID)
 
 	transcodeOptions := &TranscodeOptions{
 		Codec:      "libx264",
 		Bitrate:    "2000k",
 		Resolution: "1920x1080", // 转码到 1080p 分辨率
-		Quality:    "medium",    // x264 preset（非 profile）：medium/fast/slow 等
+		Quality:    "medium",    // x264 preset（非 profile）：medium/fast/slow 等；GPU 时为 p1-p7
 		Format:     "hls",
+		UseGPU:     os.Getenv("FFMPEG_USE_GPU") == "1", // 使用 NVIDIA NVENC 加速
 	}
 
 	hlsOutput, err := v.videoProcessingService.TranscodeVideo(localVideoPath, outputDir, outputName, transcodeOptions)
@@ -298,9 +322,12 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error {
 	fileID := msg.FileID
 
-	// 获取文件记录
+	// 获取文件记录（不存在则跳过，多为历史/过期消息）
 	file, err := v.fileRepo.GetByID(fileID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
@@ -325,8 +352,11 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 		outputName = fmt.Sprintf("playlist_%d", fileID)
 	}
 
+	// 本批次唯一 ID，避免并发处理同 topic 时本地路径冲突（否则会互相删文件导致 file not found）
+	runID := time.Now().UnixNano()
+
 	// 下载 .m3u8 播放列表文件到本地
-	localPlaylistPath := filepath.Join(v.tempDir, fmt.Sprintf("playlist_%d_%d.m3u8", fileID, time.Now().Unix()))
+	localPlaylistPath := filepath.Join(v.tempDir, fmt.Sprintf("playlist_%d_%d.m3u8", fileID, runID))
 	if err := v.s3Service.DownloadFileToPath("", tempPlaylistS3Key, localPlaylistPath); err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download playlist file: %v", err))
 		return err
@@ -340,7 +370,7 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 		if !ok {
 			continue
 		}
-		localSegmentPath := filepath.Join(v.tempDir, fmt.Sprintf("segment_%d_%d_%d.ts", fileID, i, time.Now().Unix()))
+		localSegmentPath := filepath.Join(v.tempDir, fmt.Sprintf("segment_%d_%d_%d.ts", fileID, i, runID))
 		if err := v.s3Service.DownloadFileToPath("", segmentKey, localSegmentPath); err != nil {
 			v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to download segment file %d: %v", i, err))
 			return err
@@ -437,9 +467,12 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 func (v *VideoProcessorConsumer) handleOriginalDelete(msg *KafkaMessage) error {
 	fileID := msg.FileID
 
-	// 获取文件记录
+	// 获取文件记录（不存在则跳过，多为历史/过期消息）
 	file, err := v.fileRepo.GetByID(fileID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
 		return fmt.Errorf("failed to get file: %w", err)
 	}
 
@@ -542,17 +575,46 @@ func (v *VideoProcessorConsumer) deleteS3Keys(bucket string, keys ...string) {
 	}
 }
 
-// updateFileError 更新文件错误状态
-func (v *VideoProcessorConsumer) updateFileError(fileID uint, stage entity.FileProcessingStage, errorMsg string) {
+// updateFileError 更新文件错误状态：先删除本阶段刚上传的 extraKeysToDelete，再清理 DB 中该文件的衍生资源，标记文件与内容为失败
+func (v *VideoProcessorConsumer) updateFileError(fileID uint, stage entity.FileProcessingStage, errorMsg string, extraKeysToDelete ...string) {
+	for _, key := range extraKeysToDelete {
+		_ = v.s3Service.DeleteFile("", key)
+	}
 	file, err := v.fileRepo.GetByID(fileID)
 	if err != nil {
 		fmt.Printf("Failed to get file for error update: %v\n", err)
 		return
 	}
-
+	v.cleanupFileDerivedAssets(file)
 	file.Stage = stage
 	file.ProcessingError = errorMsg
 	now := time.Now()
 	file.ProcessedAt = &now
 	v.fileRepo.Update(file)
+	content, err := v.contentRepo.GetByID(file.ContentID)
+	if err == nil {
+		content.Status = entity.ContentStatusFailed
+		v.contentRepo.Update(content)
+	}
+}
+
+// cleanupFileDerivedAssets 删除该文件在 S3 上已生成的衍生资源（GIF、模糊GIF、转码结果及 temp 转码），保留原始视频以便重试
+func (v *VideoProcessorConsumer) cleanupFileDerivedAssets(file *entity.ContentFile) {
+	if file.GifFilePath != "" {
+		_ = v.s3Service.DeleteFile("", file.GifFilePath)
+	}
+	if file.GifBlurFilePath != "" {
+		_ = v.s3Service.DeleteFile("", file.GifBlurFilePath)
+	}
+	if file.TranscodedFilePath != "" {
+		_ = v.s3Service.DeleteFile("", file.TranscodedFilePath)
+	}
+	// 删除 temp/transcoded/{contentID}/ 下该内容的所有临时转码文件
+	prefix := fmt.Sprintf("temp/transcoded/%d/", file.ContentID)
+	keys, err := v.s3Service.ListKeysByPrefix("", prefix)
+	if err == nil {
+		for _, key := range keys {
+			_ = v.s3Service.DeleteFile("", key)
+		}
+	}
 }
