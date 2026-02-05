@@ -20,6 +20,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { HlsPlayer } from "./HlsPlayer";
 import { VerticalAspectImage } from "./VerticalAspectImage";
 
+/** Format duration in seconds to "m:ss" or "h:mm:ss" */
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 /** Format created_at to Twitter-style relative time (e.g. "2h", "3d", "Jan 29") */
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
@@ -162,9 +173,9 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
               <span className="text-[var(--muted)]">
                 · {timeAgo}
               </span>
-              {item.price > 0 && (
+              {item.duration != null && item.duration > 0 && (
                 <span className="text-[var(--muted)]">
-                  · {item.price} {tFeed("credits")}
+                  · {formatDuration(item.duration)}
                 </span>
               )}
             </div>

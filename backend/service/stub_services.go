@@ -21,6 +21,9 @@ func (n noopS3Service) UploadFile(bucket, key string, file io.Reader, contentTyp
 func (n noopS3Service) UploadFileFromPath(bucket, key, filePath string, contentType string) (string, error) {
 	return "", errServiceUnavailable
 }
+func (n noopS3Service) UploadFileFromPathWithProgress(bucket, key, filePath, contentType string, onProgress func(bytesRead, totalBytes int64)) (string, error) {
+	return "", errServiceUnavailable
+}
 func (n noopS3Service) DownloadFile(bucket, key string) ([]byte, error) {
 	return nil, errServiceUnavailable
 }

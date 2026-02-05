@@ -398,6 +398,8 @@ export type ContentFeedItem = {
   /** 首文件宽高，用于预览区正确宽高比（后端从转码视频取） */
   preview_width?: number;
   preview_height?: number;
+  /** 时长（秒），用于卡片显示 */
+  duration?: number;
   /** 可观看：已购买该内容或有效会员时为 true，此时可看正常 GIF/视频 */
   purchased: boolean;
   bookmarked?: boolean;

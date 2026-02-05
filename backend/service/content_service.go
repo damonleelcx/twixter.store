@@ -104,6 +104,7 @@ type ListFeedItem struct {
 	FirstFileID      uint     `json:"first_file_id"`
 	PreviewWidth     int      `json:"preview_width,omitempty"`  // 首文件宽，用于前端正确宽高比
 	PreviewHeight    int      `json:"preview_height,omitempty"` // 首文件高
+	Duration         *float64 `json:"duration,omitempty"`      // 时长（秒），用于前端显示
 	Purchased        bool     `json:"purchased"`
 	Bookmarked       bool     `json:"bookmarked,omitempty"`
 	CreatedAt        string   `json:"created_at"`
@@ -650,12 +651,14 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 				}
 			}
 			tagNames, _ := s.GetContentTagNames(c.ID)
+			dur := c.Duration
 			out = append(out, ListFeedItem{
 				ID:             c.ID,
 				Name:           c.Name,
 				Description:    c.Description,
 				Category:       string(c.Category),
 				Price:          c.Price,
+				Duration:       dur,
 				CreatedAt:      c.CreatedAt.Format(time.RFC3339),
 				AuthorUsername: authorUsername,
 				Purchased:      purchased,
@@ -684,6 +687,10 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 		if first.Width != nil && first.Height != nil && *first.Width > 0 && *first.Height > 0 {
 			previewW, previewH = *first.Width, *first.Height
 		}
+		dur := c.Duration
+		if dur == nil && first.Duration != nil && *first.Duration > 0 {
+			dur = first.Duration
+		}
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -694,6 +701,7 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 			FirstFileID:    first.ID,
 			PreviewWidth:   previewW,
 			PreviewHeight:  previewH,
+			Duration:       dur,
 			Purchased:      purchased,
 			Bookmarked:     bookmarked,
 			CreatedAt:      c.CreatedAt.Format(time.RFC3339),
@@ -807,6 +815,7 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 				Description:    c.Description,
 				Category:       string(c.Category),
 				Price:          c.Price,
+				Duration:       c.Duration,
 				CreatedAt:      c.CreatedAt.Format(time.RFC3339),
 				AuthorUsername: authorUsername,
 				Purchased:      true,
@@ -822,6 +831,10 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 		if first.Width != nil && first.Height != nil && *first.Width > 0 && *first.Height > 0 {
 			previewW, previewH = *first.Width, *first.Height
 		}
+		dur := c.Duration
+		if dur == nil && first.Duration != nil && *first.Duration > 0 {
+			dur = first.Duration
+		}
 		out = append(out, ListFeedItem{
 			ID:             c.ID,
 			Name:           c.Name,
@@ -832,6 +845,7 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 			FirstFileID:    first.ID,
 			PreviewWidth:   previewW,
 			PreviewHeight:  previewH,
+			Duration:       dur,
 			Purchased:      true,
 			Bookmarked:     bookmarked,
 			CreatedAt:      c.CreatedAt.Format(time.RFC3339),

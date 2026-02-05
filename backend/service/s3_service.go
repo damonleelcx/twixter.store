@@ -18,6 +18,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
+const (
+	// multipart 单段最小约 5MB，这里用 10MB 以提升吞吐（参见 AWS multipart 文档）
+	multipartPartSize  = 10 * 1024 * 1024
+	multipartThreshold = 10 * 1024 * 1024 // 超过此大小走 multipart
+)
+
 // S3Service S3服务接口
 type S3Service interface {
 	// UploadFile 上传文件到S3
@@ -46,6 +52,10 @@ type S3Service interface {
 
 	// StreamFile 从S3流式传输文件，返回Reader和ContentType
 	StreamFile(bucket, key string) (io.ReadCloser, string, error)
+
+	// UploadFileFromPathWithProgress 从本地路径上传到 S3，使用 multipart 提升大文件速度，并回调进度（bytesRead, totalBytes）。
+	// onProgress 可为 nil；大文件（>multipartPartSize）走 multipart upload。
+	UploadFileFromPathWithProgress(bucket, key, filePath, contentType string, onProgress func(bytesRead, totalBytes int64)) (string, error)
 }
 
 // s3Service S3服务实现
@@ -169,22 +179,146 @@ func removeLocalWithRetry(filePath string) {
 	}
 }
 
-// UploadFileFromPath 从本地路径上传文件到S3；无论成功或失败，返回前都会尝试删除本地文件以释放磁盘空间
+// UploadFileFromPath 从本地路径上传文件到S3；成功返回前会删除本地文件以释放磁盘空间
 func (s *s3Service) UploadFileFromPath(bucket, key, filePath string, contentType string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file: %w", err)
-	}
-	url, err := s.UploadFile(bucket, key, file, contentType)
-	// 先关闭再删除，Windows 上需确保句柄释放后再 remove
-	if closeErr := file.Close(); closeErr != nil {
-		_ = closeErr
-	}
+	url, err := s.UploadFileFromPathWithProgress(bucket, key, filePath, contentType, nil)
 	removeLocalWithRetry(filePath)
 	if err != nil {
 		return "", err
 	}
 	return url, nil
+}
+
+// progressReader 包装 io.Reader，在读时回调进度（bytesRead, total）
+type progressReader struct {
+	reader     io.Reader
+	total      int64
+	read       int64
+	onProgress func(bytesRead, totalBytes int64)
+}
+
+func (p *progressReader) Read(b []byte) (n int, err error) {
+	n, err = p.reader.Read(b)
+	if n > 0 && p.onProgress != nil {
+		p.read += int64(n)
+		p.onProgress(p.read, p.total)
+	}
+	return n, err
+}
+
+// UploadFileFromPathWithProgress 从本地路径上传到 S3，支持进度回调和 multipart 大文件上传。
+func (s *s3Service) UploadFileFromPathWithProgress(bucket, key, filePath, contentType string, onProgress func(bytesRead, totalBytes int64)) (string, error) {
+	if bucket == "" {
+		bucket = s.bucket
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+	stat, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to stat file: %w", err)
+	}
+	total := stat.Size()
+	if total == 0 {
+		_, err = s.uploader.Upload(&s3manager.UploadInput{
+			Bucket:      aws.String(bucket),
+			Key:         aws.String(key),
+			Body:        f,
+			ContentType: aws.String(contentType),
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to upload file to S3: %w", err)
+		}
+		return s.buildURL(bucket, key), nil
+	}
+	if total <= multipartThreshold {
+		pr := &progressReader{reader: f, total: total, onProgress: onProgress}
+		_, err = s.uploader.Upload(&s3manager.UploadInput{
+			Bucket:      aws.String(bucket),
+			Key:         aws.String(key),
+			Body:        pr,
+			ContentType: aws.String(contentType),
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to upload file to S3: %w", err)
+		}
+		return s.buildURL(bucket, key), nil
+	}
+	// 大文件：multipart upload（CreateMultipartUpload -> UploadPart -> CompleteMultipartUpload）
+	createOut, err := s.s3Client.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create multipart upload: %w", err)
+	}
+	uploadID := createOut.UploadId
+	defer func() {
+		if uploadID != nil {
+			_, _ = s.s3Client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
+				Bucket:   aws.String(bucket),
+				Key:      aws.String(key),
+				UploadId: uploadID,
+			})
+		}
+	}()
+	var parts []*s3.CompletedPart
+	var partNumber int64 = 1
+	var readSoFar int64
+	buf := make([]byte, multipartPartSize)
+	for {
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			body := bytes.NewReader(buf[:n])
+			upOut, upErr := s.s3Client.UploadPart(&s3.UploadPartInput{
+				Bucket:     aws.String(bucket),
+				Key:        aws.String(key),
+				UploadId:   uploadID,
+				PartNumber: aws.Int64(partNumber),
+				Body:       body,
+			})
+			if upErr != nil {
+				return "", fmt.Errorf("failed to upload part %d: %w", partNumber, upErr)
+			}
+			readSoFar += int64(n)
+			if onProgress != nil {
+				onProgress(readSoFar, total)
+			}
+			parts = append(parts, &s3.CompletedPart{ETag: upOut.ETag, PartNumber: aws.Int64(partNumber)})
+			partNumber++
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", fmt.Errorf("failed to read file: %w", readErr)
+		}
+	}
+	_, err = s.s3Client.CompleteMultipartUpload(&s3.CompleteMultipartUploadInput{
+		Bucket:          aws.String(bucket),
+		Key:             aws.String(key),
+		UploadId:        uploadID,
+		MultipartUpload: &s3.CompletedMultipartUpload{Parts: parts},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to complete multipart upload: %w", err)
+	}
+	uploadID = nil
+	return s.buildURL(bucket, key), nil
+}
+
+func (s *s3Service) buildURL(bucket, key string) string {
+	if s.endpoint != "" {
+		base := strings.TrimSuffix(s.endpoint, "/")
+		if base != "" && !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+			base = "https://" + base
+		}
+		return fmt.Sprintf("%s/%s/%s", base, bucket, key)
+	}
+	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucket, s.region, key)
 }
 
 // DownloadFile 从S3下载文件
