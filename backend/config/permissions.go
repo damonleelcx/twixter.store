@@ -40,6 +40,13 @@ func InitPermissions(db *gorm.DB) {
 			IsSystem:    true,
 		},
 		{
+			Name:        "can_view_all",
+			Description: "允许查看全部内容（仅 admin 拥有，无需购买或会员）",
+			Resource:    "content",
+			Action:      entity.ActionView,
+			IsSystem:    true,
+		},
+		{
 			Name:        "can_view_nsfw",
 			Description: "允许查看NSFW内容",
 			Resource:    "nsfw",

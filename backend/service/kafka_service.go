@@ -137,19 +137,19 @@ func (k *kafkaService) StartConsumer(topic string, handler func(*KafkaMessage) e
 				case message := <-pc.Messages():
 					var kafkaMsg KafkaMessage
 					if err := json.Unmarshal(message.Value, &kafkaMsg); err != nil {
-						fmt.Printf("Failed to unmarshal message: %v\n", err)
+						LogError("Failed to unmarshal message: %v", err)
 						continue
 					}
 
 					// 处理消息
 					if err := handler(&kafkaMsg); err != nil {
-						fmt.Printf("Failed to handle message: %v\n", err)
+						LogError("Failed to handle message: %v", err)
 						// 可以在这里实现重试逻辑
 					}
 
 				case err := <-pc.Errors():
 					if err != nil {
-						fmt.Printf("Kafka consumer error: %v\n", err)
+						LogError("Kafka consumer error: %v", err)
 					}
 				}
 			}

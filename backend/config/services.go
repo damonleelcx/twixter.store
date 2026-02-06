@@ -123,6 +123,7 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 		repos.AnalyticsRepo,
 		repos.PurchaseRepo,
 		repos.UserRepo,
+		repos.UserPermissionRepo,
 		s3Service,
 		kafkaService,
 	)

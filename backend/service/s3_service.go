@@ -174,7 +174,7 @@ func removeLocalWithRetry(filePath string) {
 			time.Sleep(interval)
 			continue
 		}
-		fmt.Printf("Warning: failed to remove local file after S3 upload: %s: %v\n", filePath, err)
+		LogError("Warning: failed to remove local file after S3 upload: %s: %v", filePath, err)
 		return
 	}
 }

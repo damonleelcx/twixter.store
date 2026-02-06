@@ -104,7 +104,7 @@ type ListFeedItem struct {
 	FirstFileID      uint     `json:"first_file_id"`
 	PreviewWidth     int      `json:"preview_width,omitempty"`  // 首文件宽，用于前端正确宽高比
 	PreviewHeight    int      `json:"preview_height,omitempty"` // 首文件高
-	Duration         *float64 `json:"duration,omitempty"`      // 时长（秒），用于前端显示
+	Duration         *float64 `json:"duration,omitempty"`       // 时长（秒），用于前端显示
 	Purchased        bool     `json:"purchased"`
 	Bookmarked       bool     `json:"bookmarked,omitempty"`
 	CreatedAt        string   `json:"created_at"`
@@ -123,6 +123,7 @@ type contentService struct {
 	analyticsRepo       repository.AnalyticsRepository
 	purchaseRepo        repository.PurchaseRepository
 	userRepo            repository.UserRepository
+	userPermissionRepo  repository.UserPermissionRepository
 	s3Service           S3Service
 	kafkaService        KafkaService
 }
@@ -137,6 +138,7 @@ func NewContentService(
 	analyticsRepo repository.AnalyticsRepository,
 	purchaseRepo repository.PurchaseRepository,
 	userRepo repository.UserRepository,
+	userPermissionRepo repository.UserPermissionRepository,
 	s3Service S3Service,
 	kafkaService KafkaService,
 ) ContentService {
@@ -149,6 +151,7 @@ func NewContentService(
 		analyticsRepo:       analyticsRepo,
 		purchaseRepo:        purchaseRepo,
 		userRepo:            userRepo,
+		userPermissionRepo:  userPermissionRepo,
 		s3Service:           s3Service,
 		kafkaService:        kafkaService,
 	}
@@ -721,12 +724,18 @@ func (s *contentService) ListFeed(category string, userID uint, limit, offset in
 	return s.buildListFeedItems(contents, userID)
 }
 
-// ListFeedByTag 按标签名列出 feed 内容（仅 ready）
+// ListFeedByTag 按标签名列出 feed 内容（仅 ready）。支持带空格的标签名；先按 name 查，未找到再按 slug（空格转连字符）查。
 func (s *contentService) ListFeedByTag(tagName string, userID uint, limit, offset int) ([]ListFeedItem, error) {
+	tagName = strings.TrimSpace(tagName)
 	if tagName == "" {
 		return nil, nil
 	}
 	tag, err := s.tagRepo.GetByName(tagName)
+	if err != nil || tag == nil {
+		// 按 name 未找到时，尝试按 slug 查找（与 ensureTagExists 中 slug 规则一致：空格转连字符、小写）
+		slug := strings.ToLower(strings.ReplaceAll(tagName, " ", "-"))
+		tag, err = s.tagRepo.GetBySlug(slug)
+	}
 	if err != nil || tag == nil {
 		return []ListFeedItem{}, nil
 	}
@@ -882,10 +891,15 @@ func (s *contentService) IsBookmarked(userID, contentID uint) (bool, error) {
 	return s.contentBookmarkRepo.Exists(userID, contentID)
 }
 
-// UserCanViewContent 用户是否可观看该内容（已购买或有效会员）
+// UserCanViewContent 用户是否可观看该内容（已购买或有效会员，或拥有 can_view_all 权限如 admin）
 func (s *contentService) UserCanViewContent(userID uint, contentID uint) (bool, error) {
 	if userID == 0 {
 		return false, nil
+	}
+	// 拥有 can_view_all 权限（仅 admin）可无需购买或会员直接观看全部内容
+	hasViewAll, err := s.userPermissionRepo.HasPermission(userID, "can_view_all")
+	if err == nil && hasViewAll {
+		return true, nil
 	}
 	purchased, err := s.purchaseRepo.HasUserPurchasedContent(userID, contentID)
 	if err != nil {
