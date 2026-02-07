@@ -248,6 +248,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
             }
           }}
           className="shrink-0 p-1.5 rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--accent)] transition-colors disabled:opacity-50"
+          title={tPost("bookmark")}
           aria-label={tPost("bookmark")}
         >
           {bookmarked ? (
@@ -278,6 +279,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
             }
           }}
           className="shrink-0 p-1.5 rounded-full text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--accent)] transition-colors"
+          title={tPost("share")}
           aria-label={tPost("share")}
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>

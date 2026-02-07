@@ -167,6 +167,19 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
 
   // 未购买时预览：必须用预览流式 API（同源 URL 带 cookie，后端按权限返回模糊/清晰 GIF）
   const lockedPreviewSrc = firstFile ? getContentFilePreviewUrlSameOrigin(firstFile.id) : undefined;
+  // 视频时长或分辨率文案（未购买遮罩用）
+  const videoMetaLabel =
+    firstFile?.duration != null && firstFile.duration > 0
+      ? `${Math.floor(firstFile.duration / 60)}:${String(
+          Math.floor(firstFile.duration % 60)
+        ).padStart(2, "0")}`
+      : firstFile?.width != null &&
+          firstFile?.height != null &&
+          firstFile.width > 0 &&
+          firstFile.height > 0
+        ? `${firstFile.width}×${firstFile.height}`
+        : null;
+
   // 未购买时 wrapper 宽高比需与内容一致（竖屏时按 1.5 倍压缩）；无尺寸时不强制，避免横屏被误成竖屏
   const lockedAspectRatio =
     firstFile?.width != null &&
@@ -220,6 +233,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
             }
           }}
           className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--accent)] disabled:opacity-50"
+          title={t("bookmark")}
           aria-label={t("bookmark")}
         >
           {bookmarked ? (
@@ -248,6 +262,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
             }
           }}
           className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--accent)]"
+          title={t("share")}
           aria-label={t("share")}
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -355,10 +370,8 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
               )}
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/10 backdrop-blur-[2px]">
                 <span className="text-white font-medium">{t("unlockToView")}</span>
-                {content.price > 0 && (
-                  <span className="text-white/90 text-sm mt-1">
-                    {content.price} {t("credits")}
-                  </span>
+                {videoMetaLabel && (
+                  <span className="text-white/90 text-sm mt-1">{videoMetaLabel}</span>
                 )}
                 {getAccessToken() ? (
                   <button
