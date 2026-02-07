@@ -11,18 +11,27 @@ import { MobileWalletBar } from "./MobileWalletBar";
 
 type MainFeedWithTabsProps = {
   initialForYouFeed?: ContentFeedResponse;
+  /** When user lands with ?viewing= (e.g. encrypted viewing_dark share link), open premium tab and allow can_view_nsfw via cookie; sign up required for purchase/membership. */
+  initialTab?: FeedTab;
 };
 
-export function MainFeedWithTabs({ initialForYouFeed }: MainFeedWithTabsProps) {
-  const [activeTab, setActiveTab] = useState<FeedTab>("forYou");
+export function MainFeedWithTabs({ initialForYouFeed, initialTab }: MainFeedWithTabsProps) {
+  const [activeTab, setActiveTab] = useState<FeedTab>(initialTab ?? "forYou");
+  const [canViewNsfw, setCanViewNsfw] = useState(false);
   const defaultTabApplied = useRef(false);
 
   useEffect(() => {
-    if (defaultTabApplied.current) return;
     let cancelled = false;
     fetchCurrentUser().then((user) => {
-      if (cancelled || defaultTabApplied.current) return;
-      if (user?.permissions?.includes("can_view_nsfw")) {
+      if (cancelled) return;
+      const hasNsfw = user?.permissions?.includes("can_view_nsfw") ?? false;
+      setCanViewNsfw(hasNsfw);
+      if (defaultTabApplied.current) return;
+      if (initialTab === "premium") {
+        defaultTabApplied.current = true;
+        return;
+      }
+      if (hasNsfw) {
         defaultTabApplied.current = true;
         setActiveTab("premium");
       }
@@ -30,11 +39,15 @@ export function MainFeedWithTabs({ initialForYouFeed }: MainFeedWithTabsProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialTab]);
 
   return (
     <>
-      <MainFeedHeader activeTab={activeTab} onTabChange={setActiveTab} />
+      <MainFeedHeader
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        canViewNsfw={canViewNsfw}
+      />
       <MobileWalletBar />
       <ComposeBox />
       <FeedList activeTab={activeTab} initialForYouFeed={initialForYouFeed} />

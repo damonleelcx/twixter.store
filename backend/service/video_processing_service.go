@@ -498,11 +498,13 @@ func (v *videoProcessingService) findSegmentFiles(outputDir, outputName string) 
 
 // GetVideoInfo 获取视频信息
 func (v *videoProcessingService) GetVideoInfo(videoPath string) (*VideoInfo, error) {
-	// 使用ffprobe获取视频信息
+	// 使用 ffprobe：format=duration 得到容器时长（秒），stream 得到宽高与编码信息
+	// 输出顺序（nokey=1）：format.duration, stream.width, stream.height, stream.bit_rate, stream.codec_name, stream.r_frame_rate
 	cmd := exec.Command(v.ffprobePath,
 		"-v", "error",
 		"-select_streams", "v:0",
-		"-show_entries", "stream=width,height,duration,bit_rate,codec_name,r_frame_rate",
+		"-show_entries", "format=duration",
+		"-show_entries", "stream=width,height,bit_rate,codec_name,r_frame_rate",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		videoPath,
 	)
@@ -512,7 +514,6 @@ func (v *videoProcessingService) GetVideoInfo(videoPath string) (*VideoInfo, err
 		return nil, fmt.Errorf("failed to get video info: %w", err)
 	}
 
-	// 解析输出
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	if len(lines) < 6 {
 		return nil, fmt.Errorf("unexpected ffprobe output format")
@@ -520,10 +521,10 @@ func (v *videoProcessingService) GetVideoInfo(videoPath string) (*VideoInfo, err
 
 	info := &VideoInfo{}
 
-	// 解析宽度和高度
-	fmt.Sscanf(lines[0], "%d", &info.Width)
-	fmt.Sscanf(lines[1], "%d", &info.Height)
-	fmt.Sscanf(lines[2], "%f", &info.Duration)
+	// 解析顺序：duration(格式), width, height, bit_rate, codec_name, r_frame_rate
+	fmt.Sscanf(lines[0], "%f", &info.Duration)
+	fmt.Sscanf(lines[1], "%d", &info.Width)
+	fmt.Sscanf(lines[2], "%d", &info.Height)
 	info.Bitrate = strings.TrimSpace(lines[3])
 	info.Codec = strings.TrimSpace(lines[4])
 

@@ -86,6 +86,11 @@ export function SignUpContent() {
       <h1 className="mb-2 text-3xl font-bold tracking-tight text-[var(--foreground)]">
         {t("createAccount")}
       </h1>
+      {viewingToken && (
+        <p className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--muted)]/10 px-3 py-2 text-sm text-[var(--muted-foreground)]">
+          {t("signUpWithViewingHint")}
+        </p>
+      )}
       <form onSubmit={handleSubmit} className="mt-8 space-y-4">
         {error && (
           <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">

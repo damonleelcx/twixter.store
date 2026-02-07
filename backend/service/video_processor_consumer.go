@@ -14,6 +14,38 @@ import (
 	"gorm.io/gorm"
 )
 
+const uploadProgressBarLen = 24
+
+// uploadProgressCallback 返回用于 S3 上传的进度回调，在终端打印 [label] 进度条（bytesRead/totalBytes）。
+func uploadProgressCallback(label string, totalBytes int64) func(bytesRead, total int64) {
+	if totalBytes <= 0 {
+		return nil
+	}
+	return func(bytesRead, total int64) {
+		if total <= 0 {
+			return
+		}
+		pct := bytesRead * 100 / total
+		if pct > 100 {
+			pct = 100
+		}
+		filled := int(float64(uploadProgressBarLen) * float64(bytesRead) / float64(total))
+		if filled > uploadProgressBarLen {
+			filled = uploadProgressBarLen
+		}
+		bar := strings.Repeat("=", filled) + ">" + strings.Repeat(" ", uploadProgressBarLen-filled)
+		if filled == uploadProgressBarLen {
+			bar = strings.Repeat("=", uploadProgressBarLen)
+		}
+		mbR := bytesRead / (1024 * 1024)
+		mbT := total / (1024 * 1024)
+		fmt.Fprintf(os.Stderr, "\r  %s [%s] %3d%% (%d/%d MB)", label, bar, pct, mbR, mbT)
+		if bytesRead >= total {
+			fmt.Fprintln(os.Stderr)
+		}
+	}
+}
+
 // VideoProcessorConsumer 视频处理消费者
 type VideoProcessorConsumer struct {
 	fileRepo               repository.ContentFileRepository
@@ -161,20 +193,22 @@ func (v *VideoProcessorConsumer) handleGifGeneration(msg *KafkaMessage) error {
 		gifBlurFileSize = fi.Size()
 	}
 
-	// 上传正常 GIF 到 S3（上传后本地文件会被删除）
+	// 上传正常 GIF 到 S3（带进度；上传后由 defer 删除本地文件）
 	gifS3Key := fmt.Sprintf("gifs/%d/%d_%d.gif", file.ContentID, fileID, time.Now().Unix())
-	gifURL, err := v.s3Service.UploadFileFromPath("", gifS3Key, localGifPath, "image/gif")
+	gifURL, err := v.s3Service.UploadFileFromPathWithProgress("", gifS3Key, localGifPath, "image/gif", uploadProgressCallback("GIF", gifFileSize))
 	if err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload GIF: %v", err), gifS3Key)
 		return err
 	}
+	_ = os.Remove(localGifPath)
 
 	gifBlurS3Key := fmt.Sprintf("gifs/%d/%d_%d_blur.gif", file.ContentID, fileID, time.Now().Unix())
-	gifBlurURL, err := v.s3Service.UploadFileFromPath("", gifBlurS3Key, localGifBlurPath, "image/gif")
+	gifBlurURL, err := v.s3Service.UploadFileFromPathWithProgress("", gifBlurS3Key, localGifBlurPath, "image/gif", uploadProgressCallback("GIF blur", gifBlurFileSize))
 	if err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload blur GIF: %v", err), gifS3Key, gifBlurS3Key)
 		return err
 	}
+	_ = os.Remove(localGifBlurPath)
 
 	// 更新文件记录（失败时删除已上传的 GIF 与模糊 GIF）
 	file.GifFilePath = gifS3Key
@@ -297,21 +331,30 @@ func (v *VideoProcessorConsumer) handleVideoTranscode(msg *KafkaMessage) error {
 		}
 	}
 
-	// 上传 .m3u8 播放列表文件到S3临时位置（失败时 defer 会清理本地 playlist/ts 和 outputDir）
+	// 上传 .m3u8 播放列表文件到S3临时位置（带进度；失败时 defer 会清理本地 playlist/ts 和 outputDir）
 	tempPlaylistS3Key := fmt.Sprintf("temp/transcoded/%d/%d_%d.m3u8", file.ContentID, fileID, time.Now().Unix())
-	tempPlaylistURL, err := v.s3Service.UploadFileFromPath("", tempPlaylistS3Key, hlsOutput.PlaylistPath, "application/vnd.apple.mpegurl")
+	playlistSize := int64(0)
+	if fi, _ := os.Stat(hlsOutput.PlaylistPath); fi != nil {
+		playlistSize = fi.Size()
+	}
+	tempPlaylistURL, err := v.s3Service.UploadFileFromPathWithProgress("", tempPlaylistS3Key, hlsOutput.PlaylistPath, "application/vnd.apple.mpegurl", uploadProgressCallback("playlist(temp)", playlistSize))
 	if err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload playlist file to temp: %v", err))
 		return err
 	}
 	_ = tempPlaylistURL
 
-	// 上传所有 .ts 分片文件到S3临时位置（任一失败时删除已上传的 temp 并返回）
+	// 上传所有 .ts 分片文件到S3临时位置（带进度；任一失败时删除已上传的 temp 并返回）
 	tempSegmentS3Keys := make([]string, 0, len(hlsOutput.SegmentPaths))
 	for i, segmentPath := range hlsOutput.SegmentPaths {
 		segmentName := filepath.Base(segmentPath)
 		tempSegmentS3Key := fmt.Sprintf("temp/transcoded/%d/%d_%d_%s", file.ContentID, fileID, time.Now().Unix(), segmentName)
-		_, err := v.s3Service.UploadFileFromPath("", tempSegmentS3Key, segmentPath, "video/mp2t")
+		segSize := int64(0)
+		if fi, _ := os.Stat(segmentPath); fi != nil {
+			segSize = fi.Size()
+		}
+		label := fmt.Sprintf("segment(temp) %d/%d", i+1, len(hlsOutput.SegmentPaths))
+		_, err := v.s3Service.UploadFileFromPathWithProgress("", tempSegmentS3Key, segmentPath, "video/mp2t", uploadProgressCallback(label, segSize))
 		if err != nil {
 			v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload segment file %d to temp: %v", i, err))
 			v.deleteS3Keys("", append([]string{tempPlaylistS3Key}, tempSegmentS3Keys...)...)
@@ -439,19 +482,28 @@ func (v *VideoProcessorConsumer) handleTranscodeUpload(msg *KafkaMessage) error 
 	}
 	defer func() { _ = os.Remove(modifiedPlaylistPath) }()
 
-	// 上传 .m3u8 到最终 S3 位置（失败时上面所有 defers 会清理本地文件）
-	playlistURL, err := v.s3Service.UploadFileFromPath("", finalPlaylistS3Key, modifiedPlaylistPath, "application/vnd.apple.mpegurl")
+	// 上传 .m3u8 到最终 S3 位置（带进度；失败时上面所有 defers 会清理本地文件）
+	playlistSize := int64(0)
+	if fi, _ := os.Stat(modifiedPlaylistPath); fi != nil {
+		playlistSize = fi.Size()
+	}
+	playlistURL, err := v.s3Service.UploadFileFromPathWithProgress("", finalPlaylistS3Key, modifiedPlaylistPath, "application/vnd.apple.mpegurl", uploadProgressCallback("playlist(final)", playlistSize))
 	if err != nil {
 		v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload playlist file: %v", err))
 		return err
 	}
 
-	// 上传所有 .ts 分片文件到最终 S3 位置（任一失败时删除已上传的最终 m3u8/ts）
+	// 上传所有 .ts 分片文件到最终 S3 位置（带进度；任一失败时删除已上传的最终 m3u8/ts）
 	segmentS3Keys := make([]string, 0, len(localSegmentPaths))
 	for i, localSegmentPath := range localSegmentPaths {
 		originalSegmentName := fmt.Sprintf("%s_%03d.ts", outputName, i)
 		finalSegmentS3Key := fmt.Sprintf("%s/%s", baseDir, originalSegmentName)
-		_, err := v.s3Service.UploadFileFromPath("", finalSegmentS3Key, localSegmentPath, "video/mp2t")
+		segSize := int64(0)
+		if fi, _ := os.Stat(localSegmentPath); fi != nil {
+			segSize = fi.Size()
+		}
+		label := fmt.Sprintf("segment(final) %d/%d", i+1, len(localSegmentPaths))
+		_, err := v.s3Service.UploadFileFromPathWithProgress("", finalSegmentS3Key, localSegmentPath, "video/mp2t", uploadProgressCallback(label, segSize))
 		if err != nil {
 			v.updateFileError(fileID, entity.StageFailed, fmt.Sprintf("Failed to upload segment file %d: %v", i, err))
 			v.deleteS3Keys("", append([]string{finalPlaylistS3Key}, segmentS3Keys...)...)
@@ -520,7 +572,7 @@ func (v *VideoProcessorConsumer) handleOriginalDelete(msg *KafkaMessage) error {
 		// 本地模式：跳过删除，保留原文件
 	} else if file.OriginalFilePath != "" && !strings.HasPrefix(file.OriginalFilePath, "local:") {
 		if err := v.s3Service.DeleteFile("", file.OriginalFilePath); err != nil {
-			fmt.Printf("Failed to delete original file %s: %v\n", file.OriginalFilePath, err)
+			LogError("Failed to delete original file %s: %v", file.OriginalFilePath, err)
 		}
 	}
 
@@ -619,7 +671,7 @@ func (v *VideoProcessorConsumer) updateFileError(fileID uint, stage entity.FileP
 	}
 	file, err := v.fileRepo.GetByID(fileID)
 	if err != nil {
-		fmt.Printf("Failed to get file for error update: %v\n", err)
+		LogError("Failed to get file for error update: %v", err)
 		return
 	}
 	v.cleanupFileDerivedAssets(file)

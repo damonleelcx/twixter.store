@@ -35,7 +35,8 @@
     "credits": "积分",
     "search": "搜索",
     "searchPlaceholder": "按名称或描述搜索内容...",
-    "tagFeedHint": "带此标签的内容"
+    "tagFeedHint": "带此标签的内容",
+    "sharePremiumLink": "分享高端内容链接"
   },
   "compose": {
     "media": "媒体",
@@ -130,6 +131,7 @@
     "errorPasswordMin": "密码至少需要 8 个字符",
     "errorPasswordMismatch": "两次输入的密码不一致",
     "errorMissingToken": "缺少重置令牌，请使用邮件中的链接。",
+    "signUpWithViewingHint": "您将注册高级账号以访问此内容。购买或开通会员后可完整使用。",
     "logOut": "退出登录",
     "walletBalance": "钱包余额",
     "credits": "积分",

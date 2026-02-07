@@ -29,7 +29,21 @@ const (
 	priceCredits    = 12.99
 	categoryDark    = "dark"
 	maxTagsFromName = 5
+
+	colorRed   = "\033[31m"
+	colorReset = "\033[0m"
 )
+
+// logError 输出红色错误日志
+func logError(format string, args ...interface{}) {
+	log.Printf(colorRed+format+colorReset, args...)
+}
+
+// logFatal 输出红色错误日志并退出
+func logFatal(format string, args ...interface{}) {
+	log.Printf(colorRed+format+colorReset, args...)
+	os.Exit(1)
+}
 
 var (
 	videoExts = map[string]string{
@@ -46,7 +60,7 @@ func main() {
 	workers := flag.Int("workers", 1, "并发上传/入队数（>1 时多文件同时处理，不显示单文件 S3 进度条）")
 	flag.Parse()
 	if *folder == "" {
-		log.Fatal("请使用 -folder=./videos 指定视频文件夹")
+		logFatal("请使用 -folder=./videos 指定视频文件夹")
 	}
 	if *workers < 1 {
 		*workers = 1
@@ -57,22 +71,22 @@ func main() {
 
 	db, err := config.InitDB()
 	if err != nil {
-		log.Fatalf("数据库初始化失败: %v", err)
+		logFatal("数据库初始化失败: %v", err)
 	}
 	repos := config.InitRepositories(db)
 	s3Svc, err := service.NewS3Service()
 	if err != nil {
-		log.Fatalf("S3 初始化失败: %v", err)
+		logFatal("S3 初始化失败: %v", err)
 	}
 	kafkaSvc, err := service.NewKafkaService()
 	if err != nil {
-		log.Fatalf("Kafka 初始化失败: %v", err)
+		logFatal("Kafka 初始化失败: %v", err)
 	}
 
 	// 在本进程内启动 Kafka 消费者，使上传的视频走完整流水线（GIF → 转码 → 上传 → 删除），无需另开 backend 服务
 	videoSvc, err := service.NewVideoProcessingService()
 	if err != nil {
-		log.Printf("Warning: 视频处理服务初始化失败（需 ffmpeg/ffprobe）: %v。仅上传入队，需由其他进程消费 Kafka 完成处理。", err)
+		logError("Warning: 视频处理服务初始化失败（需 ffmpeg/ffprobe）: %v。仅上传入队，需由其他进程消费 Kafka 完成处理。", err)
 	} else {
 		consumer := service.NewVideoProcessorConsumer(
 			repos.ContentFileRepo,
@@ -82,7 +96,7 @@ func main() {
 			kafkaSvc,
 		)
 		if err := consumer.Start(); err != nil {
-			log.Printf("Warning: Kafka 消费者启动失败: %v。需由其他进程消费 Kafka 完成处理。", err)
+			logError("Warning: Kafka 消费者启动失败: %v。需由其他进程消费 Kafka 完成处理。", err)
 		} else {
 			log.Println("Kafka 消费者已启动，本进程将消费 gif-generation / video-transcode / transcode-upload / original-delete")
 		}
@@ -99,14 +113,14 @@ func main() {
 
 	// 先清理之前遗留的 processing/pending 内容（多半是失败未完成的），再处理新上传
 	if n, err := uploader.cleanupStuckContents(); err != nil {
-		log.Fatalf("清理遗留 processing/pending 内容失败: %v", err)
+		logFatal("清理遗留 processing/pending 内容失败: %v", err)
 	} else if n > 0 {
 		log.Printf("已清理 %d 条遗留的 processing/pending 内容", n)
 	}
 
 	contentIDs, err := uploader.run(*folder, *localMode, *workers)
 	if err != nil {
-		log.Fatalf("批量上传失败: %v", err)
+		logFatal("批量上传失败: %v", err)
 	}
 	if len(contentIDs) == 0 {
 		log.Println("未发现视频文件，退出")
@@ -122,7 +136,7 @@ func main() {
 		}
 		log.Printf("重试 %d 个失败项（剩余重试次数 %d）…", len(failedIDs), retriesLeft)
 		if err := uploader.retryFailed(failedIDs); err != nil {
-			log.Printf("重试入队失败: %v", err)
+			logError("重试入队失败: %v", err)
 		}
 		retriesLeft--
 	}
@@ -140,10 +154,10 @@ type bulkUploader struct {
 
 const (
 	pollInterval   = 15 * time.Second
-	reportInterval = 60 * time.Second // 详细报告打印间隔
-	maxRetries     = 2                // 单文件最多尝试次数（含首次）
-	cleanupBatch   = 500              // 清理时每批查询条数
-	progressBarLen = 24               // 进度条长度（字符）
+	reportInterval = 5 * 60 * time.Second // 详细报告打印间隔
+	maxRetries     = 2                    // 单文件最多尝试次数（含首次）
+	cleanupBatch   = 500                  // 清理时每批查询条数
+	progressBarLen = 24                   // 进度条长度（字符）
 )
 
 // s3ProgressBar 返回一个进度回调，在终端打印 S3 上传进度条（bytesRead/totalBytes）。
@@ -203,13 +217,13 @@ func (u *bulkUploader) cleanupStuckContents() (int, error) {
 		files, _ := u.fileRepo.GetByContentID(c.ID)
 		for _, f := range files {
 			if err := u.fileRepo.Delete(f.ID); err != nil {
-				log.Printf("清理 content_id=%d file_id=%d 失败: %v", c.ID, f.ID, err)
+				logError("清理 content_id=%d file_id=%d 失败: %v", c.ID, f.ID, err)
 				continue
 			}
 		}
 		_ = u.contentTagRepo.RemoveAllTagsFromContent(c.ID)
 		if err := u.contentRepo.Delete(c.ID); err != nil {
-			log.Printf("删除 content_id=%d 失败: %v", c.ID, err)
+			logError("删除 content_id=%d 失败: %v", c.ID, err)
 			continue
 		}
 		deleted++
@@ -293,7 +307,7 @@ func (u *bulkUploader) run(folder string, localMode bool, workers int) ([]uint, 
 			cid, err := u.uploadOne(p, base, ext, localMode, false)
 			mu.Lock()
 			if err != nil {
-				log.Printf("[%d/%d] %s 跳过: %v", idx+1, total, base, err)
+				logError("[%d/%d] %s 跳过: %v", idx+1, total, base, err)
 			} else {
 				contentIDs = append(contentIDs, cid)
 				log.Printf("[%d/%d] %s 完成 content_id=%d", idx+1, total, base, cid)
@@ -348,7 +362,7 @@ func (u *bulkUploader) printDetailedReport(contentIDs []uint) {
 	for _, cid := range contentIDs {
 		c, err := u.contentRepo.GetByID(cid)
 		if err != nil {
-			log.Printf("  [%d] 查询失败: %v", cid, err)
+			logError("  [%d] 查询失败: %v", cid, err)
 			continue
 		}
 		files, _ := u.fileRepo.GetByContentID(cid)
@@ -389,12 +403,12 @@ func (u *bulkUploader) retryFailed(contentIDs []uint) error {
 	for _, cid := range contentIDs {
 		content, err := u.contentRepo.GetByID(cid)
 		if err != nil {
-			log.Printf("重试 [%d]: 获取内容失败 %v", cid, err)
+			logError("重试 [%d]: 获取内容失败 %v", cid, err)
 			continue
 		}
 		files, err := u.fileRepo.GetByContentID(cid)
 		if err != nil || len(files) == 0 {
-			log.Printf("重试 [%d]: 无文件记录", cid)
+			logError("重试 [%d]: 无文件记录", cid)
 			continue
 		}
 		for _, f := range files {
@@ -411,12 +425,12 @@ func (u *bulkUploader) retryFailed(contentIDs []uint) error {
 			f.ProcessingError = ""
 			f.ProcessedAt = nil
 			if err := u.fileRepo.Update(f); err != nil {
-				log.Printf("重试 [%d] file %d: 更新文件失败 %v", cid, f.ID, err)
+				logError("重试 [%d] file %d: 更新文件失败 %v", cid, f.ID, err)
 				continue
 			}
 			content.Status = entity.ContentStatusProcessing
 			if err := u.contentRepo.Update(content); err != nil {
-				log.Printf("重试 [%d]: 更新内容失败 %v", cid, err)
+				logError("重试 [%d]: 更新内容失败 %v", cid, err)
 				continue
 			}
 			data := map[string]interface{}{
@@ -434,7 +448,7 @@ func (u *bulkUploader) retryFailed(contentIDs []uint) error {
 				Data:      data,
 			}
 			if err := u.kafkaService.SendMessage(service.TopicGifGeneration, msg); err != nil {
-				log.Printf("重试 [%d]: 发送 Kafka 失败 %v", cid, err)
+				logError("重试 [%d]: 发送 Kafka 失败 %v", cid, err)
 				continue
 			}
 			log.Printf("重试入队: content_id=%d, file_id=%d", cid, f.ID)
@@ -511,7 +525,7 @@ func translateToEnglish(text string) string {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("翻译请求失败 (%s): %v", text, err)
+		logError("翻译请求失败 (%s): %v", text, err)
 		return text
 	}
 	defer resp.Body.Close()
@@ -602,7 +616,7 @@ func (u *bulkUploader) uploadOne(localPath, baseName, ext string, localMode, sho
 	for _, tn := range tagNames {
 		id, err := u.ensureTagExists(tn)
 		if err != nil {
-			log.Printf("创建标签 %s 失败: %v", tn, err)
+			logError("创建标签 %s 失败: %v", tn, err)
 			continue
 		}
 		if id > 0 {

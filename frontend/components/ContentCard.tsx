@@ -173,11 +173,15 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
               <span className="text-[var(--muted)]">
                 · {timeAgo}
               </span>
-              {item.duration != null && item.duration > 0 && (
+              {item.duration != null && item.duration > 0 ? (
                 <span className="text-[var(--muted)]">
                   · {formatDuration(item.duration)}
                 </span>
-              )}
+              ) : (item.preview_width != null && item.preview_width > 0 && item.preview_height != null && item.preview_height > 0) ? (
+                <span className="text-[var(--muted)]">
+                  · {item.preview_width}×{item.preview_height}
+                </span>
+              ) : null}
             </div>
             {/* 2) Title */}
             <p className="mt-0.5 font-medium text-[var(--foreground)] text-[15px] leading-5 truncate">

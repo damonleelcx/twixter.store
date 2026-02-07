@@ -156,6 +156,7 @@ export type CurrentUser = {
   email_verified: boolean;
   referral_code: string;
   created_at: string;
+  /** 权限名称列表，来自 GET /auth/me。可能包含 can_view_all（仅 admin，可观看全部内容无需购买/会员）、can_view_nsfw、can_edit_content、can_upload_content、can_view_analytics 等 */
   permissions?: string[];
   wallet_balance?: number;
   membership_status?: "active" | "none";
@@ -400,7 +401,7 @@ export type ContentFeedItem = {
   preview_height?: number;
   /** 时长（秒），用于卡片显示 */
   duration?: number;
-  /** 可观看：已购买该内容或有效会员时为 true，此时可看正常 GIF/视频 */
+  /** 可观看：已购买该内容、有效会员、或拥有 can_view_all 权限（如 admin）时为 true，此时可看正常 GIF/视频 */
   purchased: boolean;
   bookmarked?: boolean;
   created_at: string;
@@ -420,7 +421,7 @@ export type ContentDetail = {
     category: string;
     price: number;
     created_at: string;
-    /** 可观看：已购买该内容或有效会员时为 true，此时可看正常 GIF/视频 */
+    /** 可观看：已购买该内容、有效会员、或拥有 can_view_all 权限（如 admin）时为 true，此时可看正常 GIF/视频 */
     purchased: boolean;
     bookmarked?: boolean;
     author_username?: string;

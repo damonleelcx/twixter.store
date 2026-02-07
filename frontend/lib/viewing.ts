@@ -40,3 +40,14 @@ export async function buildShareUrl(
   const path = `/${locale}/post/${contentId}`;
   return `${baseUrl}${path}?viewing=${encodeURIComponent(token)}`;
 }
+
+/** Build home page share URL with encrypted viewing_dark param (premium tab; can_view_nsfw via cookie; sign up required for purchase/membership, dark account only). */
+export async function buildHomeShareUrl(
+  baseUrl: string,
+  locale: string,
+  category: "light" | "dark"
+): Promise<string> {
+  const token = await fetchViewingToken(category);
+  const path = `/${locale}`;
+  return `${baseUrl}${path}?viewing=${encodeURIComponent(token)}`;
+}
