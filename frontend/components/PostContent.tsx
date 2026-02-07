@@ -287,7 +287,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
             </div>
           )}
           <div className="min-w-0 flex-1">
-            {/* 1) Upload user (author + time + credits) */}
+            {/* 1) Upload user (author + time + duration/dimension) */}
             <div className="flex flex-wrap items-center gap-1 text-[15px]">
               <span className="font-bold text-[var(--foreground)]">
                 {displayName}
@@ -295,9 +295,9 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
               <span className="text-[var(--muted)]">
                 · {timeAgo}
               </span>
-              {content.price > 0 && (
+              {videoMetaLabel && (
                 <span className="text-[var(--muted)]">
-                  · {content.price} {t("credits")}
+                  · {videoMetaLabel}
                 </span>
               )}
             </div>
@@ -370,8 +370,10 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
               )}
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/10 backdrop-blur-[2px]">
                 <span className="text-white font-medium">{t("unlockToView")}</span>
-                {videoMetaLabel && (
-                  <span className="text-white/90 text-sm mt-1">{videoMetaLabel}</span>
+                {content.price > 0 && (
+                  <span className="text-white/90 text-sm mt-1">
+                    {content.price} {t("credits")}
+                  </span>
                 )}
                 {getAccessToken() ? (
                   <button
