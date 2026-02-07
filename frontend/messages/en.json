@@ -35,7 +35,8 @@
     "credits": "credits",
     "search": "Search",
     "searchPlaceholder": "Search content by name or description...",
-    "tagFeedHint": "Content with this tag"
+    "tagFeedHint": "Content with this tag",
+    "sharePremiumLink": "Share premium link"
   },
   "compose": {
     "media": "Media",
@@ -130,6 +131,7 @@
     "errorPasswordMin": "Password must be at least 8 characters",
     "errorPasswordMismatch": "Passwords do not match",
     "errorMissingToken": "Missing reset token. Use the link from your email.",
+    "signUpWithViewingHint": "You're signing up for a premium account to access this content. Purchase or membership required for full access.",
     "logOut": "Log out",
     "walletBalance": "Wallet balance",
     "credits": "credits",
