@@ -370,11 +370,13 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
               )}
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/10 backdrop-blur-[2px]">
                 <span className="text-white font-medium">{t("unlockToView")}</span>
-                {content.price > 0 && (
-                  <span className="text-white/90 text-sm mt-1">
-                    {content.price} {t("credits")}
-                  </span>
-                )}
+                <span className="text-white/90 text-sm mt-1">
+                  {content.price > 0 ? (
+                    <>{content.price} {t("credits")}</>
+                  ) : (
+                    t("free")
+                  )}
+                </span>
                 {getAccessToken() ? (
                   <button
                     type="button"

@@ -253,29 +253,24 @@ func (s *purchaseService) PurchaseContentWithCredits(userID uint, contentID uint
 		return fmt.Errorf("content not found: %w", err)
 	}
 
-	// 检查内容是否有价格（价格即所需积分数，1 积分 = 1）
-	if content.Price <= 0 {
-		return fmt.Errorf("content is not for sale (price is 0 or not set)")
-	}
-
-	// 内容价格即为所需积分数，用户只能用积分购买
+	// 价格即所需积分数，1 积分 = 1；价格为 0 表示免费
 	creditsRequired := int64(math.Round(content.Price))
-	if creditsRequired <= 0 {
-		return fmt.Errorf("content price must be at least 1 credit")
+	if creditsRequired < 0 {
+		creditsRequired = 0
 	}
 
-	// 检查用户是否有足够的积分
-	hasEnough, err := s.walletRepo.HasEnoughCredits(userID, creditsRequired)
-	if err != nil {
-		return fmt.Errorf("failed to check credits: %w", err)
-	}
-	if !hasEnough {
-		return fmt.Errorf("insufficient credits: required %d, but user does not have enough", creditsRequired)
-	}
-
-	// 扣除积分
-	if err := s.walletRepo.SpendCredits(userID, creditsRequired); err != nil {
-		return fmt.Errorf("failed to spend credits: %w", err)
+	// 非免费内容：检查积分并扣除
+	if creditsRequired > 0 {
+		hasEnough, err := s.walletRepo.HasEnoughCredits(userID, creditsRequired)
+		if err != nil {
+			return fmt.Errorf("failed to check credits: %w", err)
+		}
+		if !hasEnough {
+			return fmt.Errorf("insufficient credits: required %d, but user does not have enough", creditsRequired)
+		}
+		if err := s.walletRepo.SpendCredits(userID, creditsRequired); err != nil {
+			return fmt.Errorf("failed to spend credits: %w", err)
+		}
 	}
 
 	// 创建购买记录
