@@ -89,7 +89,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
     async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!getAccessToken() || item.purchased || purchasing || item.price <= 0) return;
+      if (!getAccessToken() || item.purchased || purchasing) return;
       setPurchasing(true);
       try {
         await purchaseContent(item.id);
@@ -331,16 +331,20 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
               <span className="text-white font-semibold text-base drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] [text-shadow:0_0_12px_rgba(0,0,0,0.9),0_1px_3px_rgba(0,0,0,1)]">
                 {hasAuth ? tFeed("unlockToView") : tPost("signUpToView")}
               </span>
-              {item.price > 0 && hasAuth && (
+              {hasAuth && (
                 <span className="text-white/95 text-sm mt-1.5 font-medium drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] [text-shadow:0_0_8px_rgba(0,0,0,0.8),0_1px_2px_rgba(0,0,0,1)]">
-                  {item.price} {tFeed("credits")}
+                  {item.price > 0 ? (
+                    <>{item.price} {tFeed("credits")}</>
+                  ) : (
+                    tFeed("free")
+                  )}
                 </span>
               )}
               {hasAuth ? (
                 <button
                   type="button"
                   onClick={handlePurchase}
-                  disabled={purchasing || item.price <= 0}
+                  disabled={purchasing}
                   className="mt-4 rounded-lg bg-[var(--accent)] px-6 py-2 text-sm font-medium text-[var(--accent-foreground)] disabled:opacity-50 hover:opacity-90 cursor-pointer disabled:cursor-wait"
                 >
                   {purchasing ? tFeed("loading") + "…" : tPost("purchase")}

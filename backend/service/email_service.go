@@ -29,7 +29,7 @@ type emailService struct {
 
 // NewEmailService 从环境变量创建邮件服务。
 // 需要: SMTP_HOST, SMTP_USER, SMTP_PASSWORD
-// 可选: SMTP_PORT (默认 587), SMTP_FROM (默认 SMTP_USER), SMTP_USE_TLS (1/true 表示 465)
+// 可选: SMTP_PORT (默认 465), SMTP_FROM (默认 SMTP_USER), SMTP_USE_TLS (1/true 表示 465 隐式 TLS)
 // 若 SMTP_HOST 为空则返回 (nil, nil)，表示未配置邮件。
 func NewEmailService() (EmailService, error) {
 	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
@@ -43,7 +43,7 @@ func NewEmailService() (EmailService, error) {
 	}
 	portStr := strings.TrimSpace(os.Getenv("SMTP_PORT"))
 	if portStr == "" {
-		portStr = "587"
+		portStr = "465"
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port <= 0 {
