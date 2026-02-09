@@ -2,11 +2,38 @@ import { LeftSidebar } from "@/components/LeftSidebar";
 import { LibraryList } from "@/components/LibraryList";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
+import { getBaseUrlForMetadata } from "@/lib/metadata";
+import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+
+const SITE_NAME = "Twixter";
 
 type Props = {
   params: Promise<{ locale: string }>;
 };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { locale } = await params;
+  const messages = (await import(`@/messages/${locale}.json`)).default;
+  const meta = messages.meta as { libraryTitle?: string; libraryDescription?: string };
+  const title = meta?.libraryTitle ?? `Library | ${SITE_NAME}`;
+  const description = meta?.libraryDescription ?? "Your purchased content on Twixter.";
+  const canonicalUrl = `${getBaseUrlForMetadata()}/${locale}/library`;
+  return {
+    title,
+    description,
+    openGraph: {
+      type: "website",
+      locale: locale === "zh" ? "zh_CN" : "en_US",
+      url: canonicalUrl,
+      siteName: SITE_NAME,
+      title,
+      description,
+    },
+    alternates: { canonical: canonicalUrl },
+    robots: { index: false, follow: true },
+  };
+}
 
 export default async function LibraryPage({ params }: Props) {
   const { locale } = await params;
