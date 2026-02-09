@@ -4,13 +4,40 @@ import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import { SaveViewingFromUrl } from "@/components/SaveViewingFromUrl";
 import { AUTH_TOKEN_COOKIE, fetchContentFeedServer } from "@/lib/api";
+import { getBaseUrlForMetadata } from "@/lib/metadata";
+import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 import { cookies } from "next/headers";
+
+const SITE_NAME = "Twixter";
 
 type Props = {
   params: Promise<{ locale: string }>;
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { locale } = await params;
+  const messages = (await import(`@/messages/${locale}.json`)).default;
+  const meta = messages.meta as { title: string; description: string };
+  const title = meta?.title ?? `${SITE_NAME} - Home`;
+  const description = meta?.description ?? "A fresh take on social";
+  const canonicalUrl = `${getBaseUrlForMetadata()}/${locale}`;
+  return {
+    title,
+    description,
+    openGraph: {
+      type: "website",
+      locale: locale === "zh" ? "zh_CN" : "en_US",
+      url: canonicalUrl,
+      siteName: SITE_NAME,
+      title,
+      description,
+    },
+    alternates: { canonical: canonicalUrl },
+    robots: { index: true, follow: true },
+  };
+}
 
 export default async function Home({ params, searchParams }: Props) {
   const { locale } = await params;
