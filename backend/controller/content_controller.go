@@ -381,6 +381,10 @@ func (cc *ContentController) ListContent(c *gin.Context) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
+	sortBy := strings.TrimSpace(c.DefaultQuery("sort", "created_at"))
+	if sortBy != "view_count" && sortBy != "created_at" {
+		sortBy = "created_at"
+	}
 	offset := cursor * limit
 	userID := uint(0)
 	var user *entity.UserBase
@@ -405,7 +409,7 @@ func (cc *ContentController) ListContent(c *gin.Context) {
 	var items []service.ListFeedItem
 	var err error
 	if tag != "" {
-		items, err = cc.contentService.ListFeedByTag(tag, userID, limit, offset)
+		items, err = cc.contentService.ListFeedByTag(tag, userID, limit, offset, sortBy)
 	} else if q != "" {
 		// Search: users without can_view_nsfw get light only; users with can_view_nsfw search all categories
 		searchCategory := ""
@@ -418,12 +422,12 @@ func (cc *ContentController) ListContent(c *gin.Context) {
 			}
 			// hasNSFW: searchCategory stays "" so they search all content (light + dark)
 		}
-		items, err = cc.contentService.ListFeedSearch(q, searchCategory, userID, limit, offset)
+		items, err = cc.contentService.ListFeedSearch(q, searchCategory, userID, limit, offset, sortBy)
 	} else {
 		if category == "" {
 			category = "light"
 		}
-		items, err = cc.contentService.ListFeed(category, userID, limit, offset)
+		items, err = cc.contentService.ListFeed(category, userID, limit, offset, sortBy)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

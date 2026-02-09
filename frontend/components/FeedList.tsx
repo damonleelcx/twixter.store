@@ -1,7 +1,7 @@
 "use client";
 
 import type { ContentFeedItem, ContentFeedResponse } from "@/lib/api";
-import { fetchContentFeed } from "@/lib/api";
+import { type FeedSort, fetchContentFeed } from "@/lib/api";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContentCard } from "./ContentCard";
@@ -11,11 +11,12 @@ type FeedListProps = {
   activeTab: FeedTab;
   /** Server-fetched first page for "For you" tab (SSR). */
   initialForYouFeed?: ContentFeedResponse;
+  sort: FeedSort;
 };
 
 const PAGE_SIZE = 20;
 
-export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
+export function FeedList({ activeTab, initialForYouFeed, sort }: FeedListProps) {
   const locale = useLocale();
   const tFeed = useTranslations("feed");
   const [items, setItems] = useState<ContentFeedItem[]>(() =>
@@ -46,7 +47,8 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
         const { items: nextItems, next_cursor, has_more } = await fetchContentFeed(
           category,
           pageCursor,
-          PAGE_SIZE
+          PAGE_SIZE,
+          sort
         );
         setItems((prev) => {
           if (append) return [...prev, ...nextItems];
@@ -76,12 +78,12 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
         setIsLoadingMore(false);
       }
     },
-    [category]
+    [category, sort]
   );
 
-  // 切换 For you / Premium 时都重新拉取当前 tab 的列表；首屏 "For you" 且已有 SSR 数据时跳过冗余请求
+  // 切换 For you / Premium 或 sort 时重新拉取；首屏 "For you" 且已有 SSR 数据时跳过冗余请求（仅当 sort 为默认且 tab 未变）
   useEffect(() => {
-    const isForYouWithInitial = activeTab === "forYou" && initialForYouFeed != null;
+    const isForYouWithInitial = activeTab === "forYou" && initialForYouFeed != null && sort === "created_at";
     if (!initialMountDone.current && isForYouWithInitial) {
       initialMountDone.current = true;
       return;
@@ -92,7 +94,7 @@ export function FeedList({ activeTab, initialForYouFeed }: FeedListProps) {
     setHasMore(true);
     setError(null);
     loadPage(0, false);
-  }, [activeTab, loadPage, initialForYouFeed]);
+  }, [activeTab, sort, loadPage, initialForYouFeed]);
 
   // After returning from post edit, refetch current tab so list shows updated content
   useEffect(() => {

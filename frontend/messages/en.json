@@ -37,7 +37,10 @@
     "search": "Search",
     "searchPlaceholder": "Search content by name or description...",
     "tagFeedHint": "Content with this tag",
-    "sharePremiumLink": "Share premium link"
+    "sharePremiumLink": "Share premium link",
+    "sortBy": "Sort by",
+    "sortByViewCount": "View count",
+    "sortByUploadDate": "Upload date"
   },
   "compose": {
     "media": "Media",

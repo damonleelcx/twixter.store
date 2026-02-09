@@ -21,11 +21,11 @@ type ContentRepository interface {
 	GetByStatus(status entity.ContentStatus, limit, offset int) ([]entity.Content, error)
 	GetPublic(limit, offset int) ([]entity.Content, error)
 	GetByCategory(category string, limit, offset int) ([]entity.Content, error)
-	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）
-	ListFeedByCategory(category string, limit, offset int) ([]entity.Content, error)
+	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）。sortBy: "view_count" 或 "created_at"（默认）
+	ListFeedByCategory(category string, limit, offset int, sortBy string) ([]entity.Content, error)
 	Search(keyword string, limit, offset int) ([]entity.Content, error)
-	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类
-	SearchReady(keyword string, category string, limit, offset int) ([]entity.Content, error)
+	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类。sortBy: "view_count" 或 "created_at"（默认）
+	SearchReady(keyword string, category string, limit, offset int, sortBy string) ([]entity.Content, error)
 
 	// 统计操作
 	Count() (int64, error)
@@ -133,11 +133,21 @@ func (r *contentRepository) GetByCategory(category string, limit, offset int) ([
 	return contents, nil
 }
 
+// orderByClause 根据 sortBy 返回 ORDER 子句；仅支持 view_count、created_at，默认 created_at DESC
+func orderByClause(sortBy string) string {
+	switch sortBy {
+	case "view_count":
+		return "view_count DESC"
+	default:
+		return "created_at DESC"
+	}
+}
+
 // ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）
-func (r *contentRepository) ListFeedByCategory(category string, limit, offset int) ([]entity.Content, error) {
+func (r *contentRepository) ListFeedByCategory(category string, limit, offset int, sortBy string) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("category = ? AND status = ?", category, entity.ContentStatusReady).
-		Limit(limit).Offset(offset).Order("created_at DESC")
+		Limit(limit).Offset(offset).Order(orderByClause(sortBy))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}
@@ -156,7 +166,7 @@ func (r *contentRepository) Search(keyword string, limit, offset int) ([]entity.
 }
 
 // SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类
-func (r *contentRepository) SearchReady(keyword string, category string, limit, offset int) ([]entity.Content, error) {
+func (r *contentRepository) SearchReady(keyword string, category string, limit, offset int, sortBy string) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("status = ?", entity.ContentStatusReady)
 	if keyword != "" {
@@ -165,7 +175,7 @@ func (r *contentRepository) SearchReady(keyword string, category string, limit, 
 	if category != "" && (category == "light" || category == "dark") {
 		query = query.Where("category = ?", category)
 	}
-	query = query.Limit(limit).Offset(offset).Order("created_at DESC")
+	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}
