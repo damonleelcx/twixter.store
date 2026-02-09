@@ -1,6 +1,7 @@
 "use client";
 
 import type { ContentFeedResponse } from "@/lib/api";
+import type { FeedSort } from "@/lib/api";
 import { fetchCurrentUser } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import { ComposeBox } from "./ComposeBox";
@@ -17,6 +18,7 @@ type MainFeedWithTabsProps = {
 
 export function MainFeedWithTabs({ initialForYouFeed, initialTab }: MainFeedWithTabsProps) {
   const [activeTab, setActiveTab] = useState<FeedTab>(initialTab ?? "forYou");
+  const [sort, setSort] = useState<FeedSort>("created_at");
   const [canViewNsfw, setCanViewNsfw] = useState(false);
   const defaultTabApplied = useRef(false);
 
@@ -49,8 +51,8 @@ export function MainFeedWithTabs({ initialForYouFeed, initialTab }: MainFeedWith
         canViewNsfw={canViewNsfw}
       />
       <MobileWalletBar />
-      <ComposeBox />
-      <FeedList activeTab={activeTab} initialForYouFeed={initialForYouFeed} />
+      <ComposeBox sort={sort} onSortChange={setSort} />
+      <FeedList activeTab={activeTab} initialForYouFeed={initialForYouFeed} sort={sort} />
     </>
   );
 }

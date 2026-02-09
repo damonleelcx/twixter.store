@@ -2,6 +2,7 @@
 
 import type { ContentFeedItem, ContentFeedResponse } from "@/lib/api";
 import {
+  type FeedSort,
   fetchContentFeedByTag,
   fetchContentFeedSearch,
 } from "@/lib/api";
@@ -18,6 +19,7 @@ type SearchOrTagFeedListProps =
 export function SearchOrTagFeedList(props: SearchOrTagFeedListProps) {
   const locale = useLocale();
   const tFeed = useTranslations("feed");
+  const [sort, setSort] = useState<FeedSort>("created_at");
   const [items, setItems] = useState<ContentFeedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -40,13 +42,14 @@ export function SearchOrTagFeedList(props: SearchOrTagFeedListProps) {
       try {
         let result: ContentFeedResponse;
         if (props.mode === "tag") {
-          result = await fetchContentFeedByTag(props.tag, pageCursor, PAGE_SIZE);
+          result = await fetchContentFeedByTag(props.tag, pageCursor, PAGE_SIZE, sort);
         } else {
           result = await fetchContentFeedSearch(
             props.mode === "search" ? props.query : "",
             props.mode === "search" ? (props.category ?? "") : "",
             pageCursor,
-            PAGE_SIZE
+            PAGE_SIZE,
+            sort
           );
         }
         const { items: nextItems, next_cursor, has_more } = result;
@@ -73,6 +76,7 @@ export function SearchOrTagFeedList(props: SearchOrTagFeedListProps) {
       props.mode === "tag" ? props.tag : "",
       props.mode === "search" ? props.query : "",
       props.mode === "search" ? (props.category ?? "") : "",
+      sort,
     ]
   );
 
@@ -139,6 +143,33 @@ export function SearchOrTagFeedList(props: SearchOrTagFeedListProps) {
 
   return (
     <>
+      <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2">
+        <span className="text-sm text-[var(--muted)]">{tFeed("sortBy")}</span>
+        <div className="flex rounded-lg border border-[var(--border)] p-0.5">
+          <button
+            type="button"
+            onClick={() => setSort("created_at")}
+            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+              sort === "created_at"
+                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {tFeed("sortByUploadDate")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSort("view_count")}
+            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+              sort === "view_count"
+                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {tFeed("sortByViewCount")}
+          </button>
+        </div>
+      </div>
       {items.map((item) => (
         <ContentCard
           key={item.id}

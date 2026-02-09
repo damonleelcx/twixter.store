@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"mime/multipart"
 	"path"
 	"path/filepath"
@@ -57,12 +58,12 @@ type ContentService interface {
 	// GetContentAnalytics 获取内容分析数据
 	GetContentAnalytics(contentID uint, startDate, endDate string) (map[string]interface{}, error)
 
-	// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买
-	ListFeed(category string, userID uint, limit, offset int) ([]ListFeedItem, error)
+	// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买。sortBy: "view_count" 或 "created_at"（默认）
+	ListFeed(category string, userID uint, limit, offset int, sortBy string) ([]ListFeedItem, error)
 	// ListFeedByTag 按标签名列出 feed 内容（仅 ready）
-	ListFeedByTag(tagName string, userID uint, limit, offset int) ([]ListFeedItem, error)
+	ListFeedByTag(tagName string, userID uint, limit, offset int, sortBy string) ([]ListFeedItem, error)
 	// ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部
-	ListFeedSearch(q string, category string, userID uint, limit, offset int) ([]ListFeedItem, error)
+	ListFeedSearch(q string, category string, userID uint, limit, offset int, sortBy string) ([]ListFeedItem, error)
 
 	// GetGifPreview 返回 GIF 预览：可观看（已购买或有效会员）则流式返回正常 GIF，否则返回模糊 GIF
 	GetGifPreview(fileID uint, userID uint) (body io.ReadCloser, contentType string, err error)
@@ -617,32 +618,21 @@ func (s *contentService) GetContentAnalytics(contentID uint, startDate, endDate 
 	return result, nil
 }
 
+// randomUsername 为每条帖子生成一个随机显示用户名
+func randomUsername() string {
+	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 8)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return "user_" + string(b)
+}
+
 // buildListFeedItems 将 contents 转为 ListFeedItem 列表（共用逻辑）；按权限返回正常或模糊 GIF URL
 func (s *contentService) buildListFeedItems(contents []entity.Content, userID uint) ([]ListFeedItem, error) {
 	out := make([]ListFeedItem, 0, len(contents))
 	for _, c := range contents {
-		authorUsername := ""
-		if c.UploadedBy > 0 && s.userRepo != nil {
-			if u, err := s.userRepo.GetByIDFromShard(c.UploadedBy, c.UploadedBy); err == nil && u != nil {
-				if u.Username != "" {
-					authorUsername = u.Username
-				} else if u.Email != "" {
-					authorUsername = u.Email
-				}
-			}
-			if authorUsername == "" {
-				if u, err := s.userRepo.GetByID(c.UploadedBy); err == nil && u != nil {
-					if u.Username != "" {
-						authorUsername = u.Username
-					} else if u.Email != "" {
-						authorUsername = u.Email
-					}
-				}
-			}
-		}
-		if authorUsername == "" {
-			authorUsername = c.Name
-		}
+		authorUsername := randomUsername()
 		files, err := s.fileRepo.GetByContentID(c.ID)
 		if err != nil || len(files) == 0 {
 			purchased := false
@@ -716,8 +706,8 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 }
 
 // ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买
-func (s *contentService) ListFeed(category string, userID uint, limit, offset int) ([]ListFeedItem, error) {
-	contents, err := s.contentRepo.ListFeedByCategory(category, limit, offset)
+func (s *contentService) ListFeed(category string, userID uint, limit, offset int, sortBy string) ([]ListFeedItem, error) {
+	contents, err := s.contentRepo.ListFeedByCategory(category, limit, offset, sortBy)
 	if err != nil {
 		return nil, err
 	}
@@ -725,7 +715,7 @@ func (s *contentService) ListFeed(category string, userID uint, limit, offset in
 }
 
 // ListFeedByTag 按标签名列出 feed 内容（仅 ready）。支持带空格的标签名；先按 name 查，未找到再按 slug（空格转连字符）查。
-func (s *contentService) ListFeedByTag(tagName string, userID uint, limit, offset int) ([]ListFeedItem, error) {
+func (s *contentService) ListFeedByTag(tagName string, userID uint, limit, offset int, sortBy string) ([]ListFeedItem, error) {
 	tagName = strings.TrimSpace(tagName)
 	if tagName == "" {
 		return nil, nil
@@ -739,7 +729,7 @@ func (s *contentService) ListFeedByTag(tagName string, userID uint, limit, offse
 	if err != nil || tag == nil {
 		return []ListFeedItem{}, nil
 	}
-	contents, err := s.contentTagRepo.GetReadyContentsByTagID(tag.ID, limit, offset)
+	contents, err := s.contentTagRepo.GetReadyContentsByTagID(tag.ID, limit, offset, sortBy)
 	if err != nil {
 		return nil, err
 	}
@@ -747,8 +737,8 @@ func (s *contentService) ListFeedByTag(tagName string, userID uint, limit, offse
 }
 
 // ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部
-func (s *contentService) ListFeedSearch(q string, category string, userID uint, limit, offset int) ([]ListFeedItem, error) {
-	contents, err := s.contentRepo.SearchReady(q, category, limit, offset)
+func (s *contentService) ListFeedSearch(q string, category string, userID uint, limit, offset int, sortBy string) ([]ListFeedItem, error) {
+	contents, err := s.contentRepo.SearchReady(q, category, limit, offset, sortBy)
 	if err != nil {
 		return nil, err
 	}
@@ -811,10 +801,7 @@ func (s *contentService) ListPurchasedContent(userID uint, limit, offset int) ([
 		if err != nil || !c.IsReady() {
 			continue
 		}
-		authorUsername, _ := s.GetAuthorForUserID(c.UploadedBy)
-		if authorUsername == "" {
-			authorUsername = c.Name
-		}
+		authorUsername := randomUsername()
 		files, err := s.fileRepo.GetByContentID(c.ID)
 		if err != nil || len(files) == 0 {
 			tagNames, _ := s.GetContentTagNames(c.ID)

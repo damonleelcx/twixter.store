@@ -37,7 +37,10 @@
     "search": "搜索",
     "searchPlaceholder": "按名称或描述搜索内容...",
     "tagFeedHint": "带此标签的内容",
-    "sharePremiumLink": "分享高端内容链接"
+    "sharePremiumLink": "分享高端内容链接",
+    "sortBy": "排序",
+    "sortByViewCount": "观看次数",
+    "sortByUploadDate": "上传时间"
   },
   "compose": {
     "media": "媒体",

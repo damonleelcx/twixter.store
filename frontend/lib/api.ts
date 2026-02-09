@@ -587,17 +587,22 @@ export type ContentFeedResponse = {
   has_more: boolean;
 };
 
+/** Sort option for feed list: by upload date (default) or view count. */
+export type FeedSort = "created_at" | "view_count";
+
 /** Fetch content feed by category. Optional auth (token sent when available). Dark requires can_view_nsfw. */
 export async function fetchContentFeed(
   category: "light" | "dark",
   cursor: number,
-  limit = 20
+  limit = 20,
+  sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
   const params = new URLSearchParams({
     category,
     cursor: String(cursor),
     limit: String(limit),
+    sort,
   });
   const headers: HeadersInit = {};
   const token = getAccessToken();
@@ -622,13 +627,15 @@ export async function fetchContentFeed(
 export async function fetchContentFeedByTag(
   tag: string,
   cursor: number,
-  limit = 20
+  limit = 20,
+  sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
   const params = new URLSearchParams({
     tag: tag.trim(),
     cursor: String(cursor),
     limit: String(limit),
+    sort,
   });
   const headers: HeadersInit = {};
   const token = getAccessToken();
@@ -654,12 +661,14 @@ export async function fetchContentFeedSearch(
   q: string,
   category: "light" | "dark" | "",
   cursor: number,
-  limit = 20
+  limit = 20,
+  sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
   const params = new URLSearchParams({
     cursor: String(cursor),
     limit: String(limit),
+    sort,
   });
   if (q.trim()) params.set("q", q.trim());
   if (category) params.set("category", category);
@@ -838,7 +847,8 @@ export async function fetchContentFeedServer(
   category: "light" | "dark",
   cursor: number,
   limit = 20,
-  token?: string | null
+  token?: string | null,
+  sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getServerApiBase();
   if (!base) return { items: [], next_cursor: 0, has_more: false };
@@ -846,6 +856,7 @@ export async function fetchContentFeedServer(
     category,
     cursor: String(cursor),
     limit: String(limit),
+    sort,
   });
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;

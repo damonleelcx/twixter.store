@@ -1,17 +1,21 @@
 "use client";
 
+import type { FeedSort } from "@/lib/api";
 import { fetchCurrentUser } from "@/lib/api";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Icon } from "./Icon";
 
-export function ComposeBox() {
+type ComposeBoxProps = {
+  sort: FeedSort;
+  onSortChange: (sort: FeedSort) => void;
+};
+
+export function ComposeBox({ sort, onSortChange }: ComposeBoxProps) {
   const params = useParams();
   const locale = (params?.locale as string) || "en";
   const tFeed = useTranslations("feed");
-  const tCompose = useTranslations("compose");
   const tAuth = useTranslations("auth");
   const [composeText, setComposeText] = useState("");
   const [user, setUser] = useState<Awaited<ReturnType<typeof fetchCurrentUser>>>(null);
@@ -43,37 +47,32 @@ export function ComposeBox() {
           rows={2}
         />
         <div className="flex items-center justify-between border-t border-[var(--border)] pt-3">
-          <div className="flex gap-1 text-[var(--accent)]">
-            <button
-              type="button"
-              className="rounded-full p-2 hover:bg-[var(--accent)]/10"
-              aria-label={tCompose("media")}
-            >
-              <Icon
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14"
-                className="w-5 h-5"
-              />
-            </button>
-            <button
-              type="button"
-              className="rounded-full p-2 hover:bg-[var(--accent)]/10"
-              aria-label={tCompose("gif")}
-            >
-              <Icon
-                d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"
-                className="w-5 h-5"
-              />
-            </button>
-            <button
-              type="button"
-              className="rounded-full p-2 hover:bg-[var(--accent)]/10"
-              aria-label={tCompose("poll")}
-            >
-              <Icon
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                className="w-5 h-5"
-              />
-            </button>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[var(--muted)]">{tFeed("sortBy")}</span>
+            <div className="flex rounded-lg border border-[var(--border)] p-0.5">
+              <button
+                type="button"
+                onClick={() => onSortChange("created_at")}
+                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                  sort === "created_at"
+                    ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                    : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {tFeed("sortByUploadDate")}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSortChange("view_count")}
+                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                  sort === "view_count"
+                    ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                    : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {tFeed("sortByViewCount")}
+              </button>
+            </div>
           </div>
           {isLoggedIn ? (
             canUpload ? (
