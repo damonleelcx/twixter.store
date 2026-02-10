@@ -54,9 +54,9 @@ export default async function Home({ params, searchParams }: Props) {
   );
 
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+    <div className="min-h-screen min-w-0 overflow-x-hidden bg-[var(--background)] text-[var(--foreground)]">
       <SaveViewingFromUrl />
-      <div className="mx-auto flex max-w-[1280px]">
+      <div className="mx-auto flex min-w-0 max-w-[1280px]">
         <LeftSidebar locale={locale} />
         <main className="min-w-0 flex-1 border-x border-[var(--border)] md:max-w-[600px]">
           <MainFeedWithTabs

@@ -42,10 +42,16 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 /* Safe area for mobile notches / home indicator */
