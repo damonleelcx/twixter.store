@@ -1,4 +1,8 @@
 {
+  "home": {
+    "promoBannerText": "Limited Time Offer: Sign up now to earn free credits",
+    "promoBannerCta": "Sign up now"
+  },
   "nav": {
     "home": "Home",
     "explore": "Explore",

@@ -6,7 +6,7 @@ import { SaveViewingFromUrl } from "@/components/SaveViewingFromUrl";
 import { AUTH_TOKEN_COOKIE, fetchContentFeedServer } from "@/lib/api";
 import { getBaseUrlForMetadata } from "@/lib/metadata";
 import type { Metadata } from "next";
-import { setRequestLocale } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import { cookies } from "next/headers";
 import Link from "next/link";
 
@@ -48,6 +48,7 @@ export default async function Home({ params, searchParams }: Props) {
   const hasViewingParam =
     typeof sp?.viewing === "string" && sp.viewing.trim() !== "";
 
+  const t = await getTranslations("home");
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_TOKEN_COOKIE)?.value;
   const initialForYouFeed = await fetchContentFeedServer("light", 0, 20, token).catch(
@@ -59,13 +60,13 @@ export default async function Home({ params, searchParams }: Props) {
       <SaveViewingFromUrl />
       {!token && (
         <div className="border-b border-[var(--border)] bg-[var(--accent)] px-4 py-3 text-center text-sm text-[var(--accent-foreground)]">
-          <span className="font-medium">Limited Time Offer: Sign up now to earn free credits</span>
+          <span className="font-medium">{t("promoBannerText")}</span>
           {" · "}
           <Link
             href={`/${locale}/auth/signup?promo=freecredits`}
             className="font-bold underline hover:no-underline"
           >
-            Sign up now
+            {t("promoBannerCta")}
           </Link>
         </div>
       )}

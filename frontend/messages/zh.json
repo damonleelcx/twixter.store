@@ -1,4 +1,8 @@
 {
+  "home": {
+    "promoBannerText": "限时福利：立即注册即可获得免费积分",
+    "promoBannerCta": "立即注册"
+  },
   "nav": {
     "home": "首页",
     "explore": "探索",
