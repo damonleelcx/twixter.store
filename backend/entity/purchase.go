@@ -15,6 +15,7 @@ const (
 	PurchaseTypeMembership     PurchaseType = "membership"      // 购买会员（使用积分）
 	PurchaseTypeContent        PurchaseType = "content"         // 购买内容（使用积分）
 	PurchaseTypeReferralReward PurchaseType = "referral_reward" // 推荐奖励（推荐新用户获得的积分）
+	PurchaseTypeSignupPromo    PurchaseType = "signup_promo"    // 注册促销（通过 promo=freecredits 注册赠送的积分）
 )
 
 // PurchaseStatus 购买状态枚举

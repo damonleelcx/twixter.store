@@ -41,6 +41,10 @@ export function SignUpContent() {
     if (ref && typeof ref === "string") setReferralCode(ref.trim());
   }, [searchParams]);
 
+  // Show "Sign up now to earn free credits" banner when ?promo=freecredits (or ?signup=now)
+  const showFreeCreditsBanner =
+    searchParams.get("promo") === "freecredits" || searchParams.get("signup") === "now";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -55,6 +59,7 @@ export function SignUpContent() {
         password,
         username: username.trim() || undefined,
         referral_code: referralCode.trim() || undefined,
+        promo_freecredits: showFreeCreditsBanner || undefined,
       };
       if (viewingToken) {
         body.viewing_token = viewingToken;

@@ -205,6 +205,7 @@ export async function authApiRegister(body: {
   referral_code?: string;
   viewing?: "viewing_light" | "viewing_dark";
   viewing_token?: string;
+  promo_freecredits?: boolean;
 }): Promise<{ user: unknown; session: { access_token: string; refresh_token?: string } }> {
   const base = getApiBase();
   const res = await fetch(`${base}/auth/register`, {
