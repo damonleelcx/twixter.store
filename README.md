@@ -78,9 +78,9 @@ minikube ip
 
 记下输出的 IP（例如 `192.168.49.2`）。在**本机 hosts** 里为前后端各加一行，把 `<MINIKUBE_IP>` 换成上面得到的 IP：
 
-| 主机名 | 用途 |
-|------|------|
-| `<MINIKUBE_IP>/127.0.0.1 api.twixter.local` | Backend（Ingress） |
+| 主机名                                      | 用途                |
+| ------------------------------------------- | ------------------- |
+| `<MINIKUBE_IP>/127.0.0.1 api.twixter.local` | Backend（Ingress）  |
 | `<MINIKUBE_IP>/127.0.0.1 www.twixter.local` | Frontend（Ingress） |
 
 **说明：** `*.twixter.local` 是本地测试用的主机名，**不需要购买或拥有这些域名**。`.local` 常用于本机/局域网；把上面两行写进 hosts 后，只有你这台电脑会把这两个名字解析到 Minikube IP，不会走公网 DNS。
@@ -106,16 +106,17 @@ sudo nano /etc/hosts
 
 先让当前终端使用 Minikube 内的 Docker（构建的镜像会直接进 Minikube）：
 
-| 终端 | 命令 |
-|------|------|
-| **Bash / Git Bash** | `eval $(minikube docker-env)` |
-| **PowerShell** | `minikube docker-env --shell powershell | Invoke-Expression` |
-| **CMD** | `for /f "tokens=*" %i in ('minikube docker-env --shell cmd') do %i`（在 .bat 里用 `%%i`） |
+| 终端                | 命令                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------- | ------------------ |
+| **Bash / Git Bash** | `eval $(minikube docker-env)`                                                             |
+| **PowerShell**      | `minikube docker-env --shell powershell                                                   | Invoke-Expression` |
+| **CMD**             | `for /f "tokens=*" %i in ('minikube docker-env --shell cmd') do %i`（在 .bat 里用 `%%i`） |
 
 然后执行下面的构建（以下以 Bash 为例；Windows 下用 PowerShell 或 CMD 时，多行可改成一行或用 `^` 续行）。
 
-**环境变量 / .env 说明**  
-- **Backend**：镜像构建不依赖 .env；**部署**（步骤 4）时需在 `backend/k8s/` 下存在 `.env`（可从 `backend/.env` 复制），用于 k8s 生成 Secret（见根目录 `k8s/` 及 `backend/k8s/kustomization.yaml`）。  
+**环境变量 / .env 说明**
+
+- **Backend**：镜像构建不依赖 .env；**部署**（步骤 4）时需在 `backend/k8s/` 下存在 `.env`（可从 `backend/.env` 复制），用于 k8s 生成 Secret（见根目录 `k8s/` 及 `backend/k8s/kustomization.yaml`）。
 - **Frontend**：构建时需传入 `NEXT_PUBLIC_*` 等变量；若在 `frontend/` 下使用 `.env`，建议先加载再执行 `docker build`，这样 Stripe/PayPal 等 key 会通过 `--build-arg` 传入镜像。
 
 **Backend**（在项目根目录下）：
@@ -224,7 +225,7 @@ kubectl apply -k k8s/
 
 改完 **backend** 或 **frontend** 代码后，需要重新构建镜像并让集群用新镜像跑：
 
-1. **重新构建镜像**（二选一）  
+1. **重新构建镜像**（二选一）
    - **Minikube 本地**：先 `eval $(minikube docker-env)`（Windows PowerShell：`minikube docker-env --shell powershell | Invoke-Expression`），再在对应目录构建：
      - Backend：`cd backend && docker build -t damonleelcx/twixter.store-backend:latest . && cd ..`
      - Frontend：`cd frontend && docker build -t damonleelcx/twixter.store-frontend:latest --build-arg NEXT_PUBLIC_API_URL=http://api.twixter.local --build-arg NEXT_PUBLIC_APP_URL=http://www.twixter.local --build-arg BACKEND_URL=http://twixter-backend:8080 . && cd ..`（按需加 `--build-arg`，与步骤 3 一致）
@@ -346,24 +347,24 @@ kubectl logs deployment/twixter-backend
 
 若 `http://api.twixter.local/health` 能打开，但 `http://www.twixter.local` 无响应，按下面检查：
 
-1. **前端 Pod 是否在跑**：`kubectl get pods -l app=twixter-frontend`  
-   - 若为 `Running` 且 `READY 1/1`，继续下一步。  
+1. **前端 Pod 是否在跑**：`kubectl get pods -l app=twixter-frontend`
+   - 若为 `Running` 且 `READY 1/1`，继续下一步。
    - 若为 `CrashLoopBackOff` 或 `Pending`：`kubectl logs deployment/twixter-frontend`（或 `kubectl describe pod <frontend-pod名>`）看原因；常见为镜像未构建或未拉取（`ImagePullBackOff`），需在 Minikube 内构建前端镜像并确认名为 `damonleelcx/twixter.store-frontend:latest`。
 
-2. **hosts 是否包含 www**：本机 hosts 里除 `api.twixter.local` 外，必须有 `<MINIKUBE_IP>/127.0.0.1 www.twixter.local`（`minikube ip` 得到 IP）。  
+2. **hosts 是否包含 www**：本机 hosts 里除 `api.twixter.local` 外，必须有 `<MINIKUBE_IP>/127.0.0.1 www.twixter.local`（`minikube ip` 得到 IP）。
    - 终端执行：`ping www.twixter.local`，应解析到 Minikube IP。
 
-3. **Windows 是否开了 Minikube 隧道**：Ingress 使用 80 端口，在 Windows 上通常需要**以管理员身份**开一个终端并执行 `minikube tunnel`，保持不关。否则本机访问 `www.twixter.local` 可能无响应。  
+3. **Windows 是否开了 Minikube 隧道**：Ingress 使用 80 端口，在 Windows 上通常需要**以管理员身份**开一个终端并执行 `minikube tunnel`，保持不关。否则本机访问 `www.twixter.local` 可能无响应。
    - 若 tunnel 报错或无法用，改用端口转发：`kubectl port-forward svc/twixter-frontend 3000:3000`，浏览器访问 `http://localhost:3000`。
 
-4. **Ingress 是否生效**：`kubectl get ingress` 中应有 `twixter-frontend-ingress`，且 `HOSTS` 为 `www.twixter.local`。  
+4. **Ingress 是否生效**：`kubectl get ingress` 中应有 `twixter-frontend-ingress`，且 `HOSTS` 为 `www.twixter.local`。
    - 快速区分问题：若 `kubectl port-forward svc/twixter-frontend 3000:3000` 后访问 `http://localhost:3000` 正常，则问题在 **hosts 或 Ingress 或 minikube tunnel**；若 port-forward 也无响应，则问题在 **前端 Pod/应用**。
 
 **常见原因与处理：**
 
-1. **Database initialization failed**  
-   - 说明集群内无法连接 Postgres。Secret 来自 `backend/k8s/.env`（Kustomize 的 secretGenerator）。  
-   - 检查 `backend/k8s/.env` 中 `DB_HOST`、`DB_USER`、`DB_PASSWORD`、`DB_NAME`、`DB_PORT`、`DB_SSLMODE` 是否为**托管 Postgres** 的真实值，且从本机/集群能访问该主机（防火墙、安全组、VPC）。  
+1. **Database initialization failed**
+   - 说明集群内无法连接 Postgres。Secret 来自 `backend/k8s/.env`（Kustomize 的 secretGenerator）。
+   - 检查 `backend/k8s/.env` 中 `DB_HOST`、`DB_USER`、`DB_PASSWORD`、`DB_NAME`、`DB_PORT`、`DB_SSLMODE` 是否为**托管 Postgres** 的真实值，且从本机/集群能访问该主机（防火墙、安全组、VPC）。
    - 修改后重新部署：`kubectl apply -k k8s/`，再 `kubectl rollout restart deployment/twixter-backend`。
 
    **使用本机 Postgres（Minikube）**：后端在 Pod 里跑，Pod 里的 `localhost` / `127.0.0.1` 指向 Pod 自己，**不是你的电脑**。若 Postgres 装在本机，在 `backend/k8s/.env` 里要把 `DB_HOST` 写成集群能解析到本机的地址，不要用 `localhost` 或 `127.0.0.1`：
@@ -375,37 +376,37 @@ kubectl logs deployment/twixter-backend
    - **本机 Postgres 必须接受来自 Minikube 的连接**：在 Postgres 的 `postgresql.conf` 里设 `listen_addresses = '*'`（或至少包含本机对 Minikube 网段的 IP），在 `pg_hba.conf` 里允许 Minikube 网段（如 `192.168.0.0/16` 或 `10.0.0.0/8`）的 TCP 连接，然后重启 Postgres。否则 Pod 仍会连不上。
 
    **如何查看并确认上述配置：**
-
    1. **找到配置文件路径**：用 `psql` 连上本机 Postgres 后执行 `SHOW config_file;` 得到 `postgresql.conf` 路径，执行 `SHOW hba_file;` 得到 `pg_hba.conf` 路径。常见位置：Windows 安装版多在 `C:\Program Files\PostgreSQL\<版本>\data\`；Linux 多在 `/etc/postgresql/<版本>/main/` 或 `/var/lib/pgsql/data/`。
    2. **查看 `listen_addresses`**：用编辑器打开 `postgresql.conf`，搜索 `listen_addresses`。确认其值为 `listen_addresses = '*'` 或至少包含本机对 Minikube 可见的 IP。若该行被 `#` 注释，需去掉注释并改值后保存。
    3. **查看 `pg_hba.conf`**：用编辑器打开 `pg_hba.conf`，查看 “TYPE DATABASE USER ADDRESS METHOD” 规则。需有一行允许 Minikube 网段的 TCP 连接，例如：`host    all    all    192.168.0.0/16    scram-sha-256` 或 `host    all    all    10.0.0.0/8    scram-sha-256`（网段按你 Minikube 实际网段调整）。若无则添加并保存。
    4. **修改后重启 Postgres**：Windows 在「服务」（即 Windows 的服务管理界面：按 `Win+R` 输入 `services.msc` 回车可打开，或开始菜单搜索「服务」）里找到 `postgresql-x64-<版本>`，右键 → 重新启动；Linux 使用 `sudo systemctl restart postgresql`（或 `postgresql-16` 等，视发行版而定）。
 
-2. **Redis 连接失败（如 dial tcp: lookup redis-service: no such host 或 dial tcp [::1]:6379: connection refused）**  
-   - 后端默认需要 Redis（`REDIS_ADDR`）。若未在 Secret 中设置，应用会使用默认值 `localhost:6379`，在 Pod 内 localhost 指向 Pod 自身，会报 `[::1]:6379: connection refused`。  
-   - **方案 A（推荐，集群内 Redis）**：仓库已在 `backend/k8s/` 下提供 `redis-deployment.yaml` 和 `redis-service.yaml`，`kubectl apply -k k8s/` 会一并部署 Redis 并创建名为 `redis-service` 的 Service（端口 6379）。  
-     1. 在 **`backend/k8s/.env`** 中设置：`REDIS_ADDR=redis-service:6379`、`REDIS_PASSWORD=`、`REDIS_DB=0`（若未设置 `REDIS_ADDR`，后端会退回到 `localhost:6379` 导致连不上）。  
-     2. 在仓库根目录执行：`kubectl apply -k k8s/`（部署 Redis 并重新生成 Secret），再执行 `kubectl rollout restart deployment/twixter-backend`。  
-     3. 确认 Secret 里已是新值（应看到 `redis-service:6379`；若为空或 `localhost:6379`，说明未用 `backend/k8s/.env` 或未执行 `kubectl apply -k k8s/`）：  
-        - **Linux / macOS**：`kubectl get secret twixter-backend-secret -o jsonpath='{.data.REDIS_ADDR}' | base64 -d`  
-        - **Windows（PowerShell）**：`[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((kubectl get secret twixter-backend-secret -o jsonpath='{.data.REDIS_ADDR}')))`  
-     4. 确认：`kubectl get pods` 中 Redis Pod 为 Running，`kubectl logs deployment/twixter-backend -f` 无 Redis 连接错误。  
+2. **Redis 连接失败（如 dial tcp: lookup redis-service: no such host 或 dial tcp [::1]:6379: connection refused）**
+   - 后端默认需要 Redis（`REDIS_ADDR`）。若未在 Secret 中设置，应用会使用默认值 `localhost:6379`，在 Pod 内 localhost 指向 Pod 自身，会报 `[::1]:6379: connection refused`。
+   - **方案 A（推荐，集群内 Redis）**：仓库已在 `backend/k8s/` 下提供 `redis-deployment.yaml` 和 `redis-service.yaml`，`kubectl apply -k k8s/` 会一并部署 Redis 并创建名为 `redis-service` 的 Service（端口 6379）。
+     1. 在 **`backend/k8s/.env`** 中设置：`REDIS_ADDR=redis-service:6379`、`REDIS_PASSWORD=`、`REDIS_DB=0`（若未设置 `REDIS_ADDR`，后端会退回到 `localhost:6379` 导致连不上）。
+     2. 在仓库根目录执行：`kubectl apply -k k8s/`（部署 Redis 并重新生成 Secret），再执行 `kubectl rollout restart deployment/twixter-backend`。
+     3. 确认 Secret 里已是新值（应看到 `redis-service:6379`；若为空或 `localhost:6379`，说明未用 `backend/k8s/.env` 或未执行 `kubectl apply -k k8s/`）：
+        - **Linux / macOS**：`kubectl get secret twixter-backend-secret -o jsonpath='{.data.REDIS_ADDR}' | base64 -d`
+        - **Windows（PowerShell）**：`[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((kubectl get secret twixter-backend-secret -o jsonpath='{.data.REDIS_ADDR}')))`
+     4. 确认：`kubectl get pods` 中 Redis Pod 为 Running，`kubectl logs deployment/twixter-backend -f` 无 Redis 连接错误。
    - **方案 B**：使用外部 Redis（如宿主机上的 Redis），在 `backend/k8s/.env` 里设置 `REDIS_ADDR=host.minikube.internal:6379`（或你的 Redis 地址:端口），重新生成 Secret 并重启 backend。
 
-2.1 **Kafka 未配置（Failed to initialize Kafka service: ... dial tcp [::1]:9092: connection refused）**  
-   - 后端视频上传与处理依赖 Kafka。若未在 Secret 中设置 `KAFKA_BROKERS`，应用会使用默认值 `localhost:9092`，在 Pod 内会连不上。  
-   - **方案 A（推荐，集群内 Kafka）**：仓库已在 `backend/k8s/` 下提供 `zookeeper-deployment.yaml`、`zookeeper-service.yaml`、`kafka-deployment.yaml`、`kafka-service.yaml`，`kubectl apply -k k8s/` 会一并部署 Zookeeper 与 Kafka，并创建名为 `kafka` 的 Service（端口 9092）。  
-     1. 在 **`backend/k8s/.env`** 中设置：`KAFKA_BROKERS=kafka:9092`。  
-     2. 在仓库根目录执行：`kubectl apply -k k8s/`（部署 Zookeeper/Kafka 并重新生成 Secret），再执行 `kubectl rollout restart deployment/twixter-backend`。  
-     3. 确认：`kubectl get pods` 中 `zookeeper-*` 与 `kafka-*` 为 Running，`kubectl logs deployment/twixter-backend` 无 Kafka 连接错误。  
-   - **方案 B**：使用外部 Kafka，在 `backend/k8s/.env` 里设置 `KAFKA_BROKERS=你的 Kafka 地址:9092`，重新生成 Secret 并重启 backend。未配置时视频处理不可用，内容只读接口仍可用（见上文 4）。
+2.1 **Kafka 未配置（Failed to initialize Kafka service: ... dial tcp [::1]:9092: connection refused）**
 
-3. **Database migration failed**  
+- 后端视频上传与处理依赖 Kafka。若未在 Secret 中设置 `KAFKA_BROKERS`，应用会使用默认值 `localhost:9092`，在 Pod 内会连不上。
+- **方案 A（推荐，集群内 Kafka）**：仓库已在 `backend/k8s/` 下提供 `zookeeper-deployment.yaml`、`zookeeper-service.yaml`、`kafka-deployment.yaml`、`kafka-service.yaml`，`kubectl apply -k k8s/` 会一并部署 Zookeeper 与 Kafka，并创建名为 `kafka` 的 Service（端口 9092）。
+  1.  在 **`backend/k8s/.env`** 中设置：`KAFKA_BROKERS=kafka:9092`。
+  2.  在仓库根目录执行：`kubectl apply -k k8s/`（部署 Zookeeper/Kafka 并重新生成 Secret），再执行 `kubectl rollout restart deployment/twixter-backend`。
+  3.  确认：`kubectl get pods` 中 `zookeeper-*` 与 `kafka-*` 为 Running，`kubectl logs deployment/twixter-backend` 无 Kafka 连接错误。
+- **方案 B**：使用外部 Kafka，在 `backend/k8s/.env` 里设置 `KAFKA_BROKERS=你的 Kafka 地址:9092`，重新生成 Secret 并重启 backend。未配置时视频处理不可用，内容只读接口仍可用（见上文 4）。
+
+3. **Database migration failed**
    - 多为 DB 连接或权限问题，先按 1 确保能连上库，再查日志中的具体错误。
 
-4. **/api/content/* 返回 404（如 /api/content/viewing-token、/api/content/list）**  
-   - **原因**：内容相关路由由 ContentController 注册，而 ContentController 仅在 ContentService 存在时注册。此前 ContentService 只有在 **S3 和 Kafka 都初始化成功** 时才会创建；若 `backend/k8s/.env` 未配置 AWS 或 Kafka，S3/Kafka 初始化失败 → ContentService 未创建 → 内容路由未注册 → 请求返回 404。  
-   - **处理**：仓库已修改后端逻辑：S3 或 Kafka 初始化失败时改用占位实现（`backend/service/stub_services.go` 中的 `NoopS3Service` / `NoopKafkaService`），**始终创建 ContentService**，因此 `/api/content/list`、`/api/content/viewing-token`、`/api/content/:id` 等只读接口会正常注册；上传、流式播放、GIF 预览等依赖 S3/Kafka 的接口在未配置时会返回 503 或明确错误。  
+4. **/api/content/\* 返回 404（如 /api/content/viewing-token、/api/content/list）**
+   - **原因**：内容相关路由由 ContentController 注册，而 ContentController 仅在 ContentService 存在时注册。此前 ContentService 只有在 **S3 和 Kafka 都初始化成功** 时才会创建；若 `backend/k8s/.env` 未配置 AWS 或 Kafka，S3/Kafka 初始化失败 → ContentService 未创建 → 内容路由未注册 → 请求返回 404。
+   - **处理**：仓库已修改后端逻辑：S3 或 Kafka 初始化失败时改用占位实现（`backend/service/stub_services.go` 中的 `NoopS3Service` / `NoopKafkaService`），**始终创建 ContentService**，因此 `/api/content/list`、`/api/content/viewing-token`、`/api/content/:id` 等只读接口会正常注册；上传、流式播放、GIF 预览等依赖 S3/Kafka 的接口在未配置时会返回 503 或明确错误。
    - **你需要做的**：重新构建后端镜像并重启 backend 部署（例如在 Minikube 内执行 `docker build -t damonleelcx/twixter.store-backend:latest ./backend`，再 `kubectl rollout restart deployment/twixter-backend`）。无需在 `.env` 中配置 S3/Kafka 即可使用内容列表与 viewing-token 等只读接口。
 
 **5. 用端口转发临时验证（不依赖 Ingress）**
@@ -439,11 +440,11 @@ kubectl port-forward svc/twixter-frontend 3000:3000
 1. **确认 hosts**：本机 hosts 里必须有 `<MINIKUBE_IP>/127.0.0.1 api.twixter.local`（`minikube ip` 得到当前 IP）。Windows：`C:\Windows\System32\drivers\etc\hosts`。终端执行 `ping api.twixter.local` 应解析到 Minikube IP。
 2. **确认 Minikube 隧道在跑**：以**管理员身份**开一个终端，执行 `minikube tunnel` 并**保持不关**。Ingress 使用 80 端口，浏览器访问 `http://api.twixter.local` 会连到 Minikube IP:80，隧道负责把 80 转到集群内后端。若隧道未开或 Windows 上 80 端口转发失败，api.twixter.local 会超时。
 3. **先单独测后端**：在浏览器打开 `http://api.twixter.local/health`。若能看到健康检查结果，说明 api.twixter.local 已通，前端的 `/api/auth/me` 等请求也应能通；若 `/health` 也超时，问题在 hosts 或隧道。
-4. **若隧道在 Windows 上 80 端口不可用（仅用 port-forward）**：前端构建时 API 写死为 `http://api.twixter.local`，浏览器会请求该域名（默认 80 端口）。要让 API 通，需让 api.twixter.local 在本机指向后端 port-forward 的端口：  
-   - **hosts**：添加 `127.0.0.1 api.twixter.local`（Windows：`C:\Windows\System32\drivers\etc\hosts`，需管理员权限编辑）。  
-   - **后端 port-forward**：`kubectl port-forward svc/twixter-backend 8080:8080`（保持运行）。  
-   - **本地 API 代理**：在仓库根目录执行 `node scripts/local-api-proxy.js`。该脚本监听本机 80 端口并转发到 `http://127.0.0.1:8080`，浏览器访问 `http://api.twixter.local` 时会走 127.0.0.1:80 → 代理 → 127.0.0.1:8080。**Windows 上绑定 80 端口通常需以管理员身份**打开终端再运行上述命令。  
-   - **若报错 `EADDRINUSE: address already in use 127.0.0.1:80`**：说明 80 端口已被占用（常见为 IIS、Skype、其他 Web 服务）。可先查占用进程：`netstat -ano | findstr :80`，记下最后一列 PID，再 `taskkill /PID <pid> /F` 结束该进程（或从「服务」里停止 IIS 等）；若不能释放 80，可改用其他端口：`set PORT=8081&& node scripts/local-api-proxy.js`，然后**重新构建前端**时传入 `NEXT_PUBLIC_API_URL=http://api.twixter.local:8081`，并重新部署前端，这样浏览器会请求 api.twixter.local:8081。  
+4. **若隧道在 Windows 上 80 端口不可用（仅用 port-forward）**：前端构建时 API 写死为 `http://api.twixter.local`，浏览器会请求该域名（默认 80 端口）。要让 API 通，需让 api.twixter.local 在本机指向后端 port-forward 的端口：
+   - **hosts**：添加 `127.0.0.1 api.twixter.local`（Windows：`C:\Windows\System32\drivers\etc\hosts`，需管理员权限编辑）。
+   - **后端 port-forward**：`kubectl port-forward svc/twixter-backend 8080:8080`（保持运行）。
+   - **本地 API 代理**：在仓库根目录执行 `node scripts/local-api-proxy.js`。该脚本监听本机 80 端口并转发到 `http://127.0.0.1:8080`，浏览器访问 `http://api.twixter.local` 时会走 127.0.0.1:80 → 代理 → 127.0.0.1:8080。**Windows 上绑定 80 端口通常需以管理员身份**打开终端再运行上述命令。
+   - **若报错 `EADDRINUSE: address already in use 127.0.0.1:80`**：说明 80 端口已被占用（常见为 IIS、Skype、其他 Web 服务）。可先查占用进程：`netstat -ano | findstr :80`，记下最后一列 PID，再 `taskkill /PID <pid> /F` 结束该进程（或从「服务」里停止 IIS 等）；若不能释放 80，可改用其他端口：`set PORT=8081&& node scripts/local-api-proxy.js`，然后**重新构建前端**时传入 `NEXT_PUBLIC_API_URL=http://api.twixter.local:8081`，并重新部署前端，这样浏览器会请求 api.twixter.local:8081。
    - 保持三个进程运行：① 后端 port-forward；② 本地 API 代理（本脚本）；③ 前端 port-forward（`kubectl port-forward svc/twixter-frontend 3000:3000`）。然后访问 `http://localhost:3000`，前端的 `/api/auth/me` 等请求会通过 api.twixter.local → 本机 80 → 代理 → 8080 正常返回。
 
 **6. 若非 Minikube（如 Docker Desktop K8s、kind）**
@@ -466,12 +467,14 @@ kubectl port-forward svc/twixter-frontend 3000:3000
 ### 步骤 1：准备服务器（SSH、系统、防火墙）
 
 1. **SSH 登录**（将 `<SERVER_IP>` 换成服务器公网 IP）：
+
    ```bash
    ssh root@<SERVER_IP>
    # 或 ssh your_user@<SERVER_IP>
    ```
 
 2. **更新系统并安装基础工具**（以 Rocky Linux 8 为例）：
+
    ```bash
    sudo dnf update -y
    sudo dnf install -y curl git
@@ -490,10 +493,10 @@ kubectl port-forward svc/twixter-frontend 3000:3000
 
 在域名服务商控制台为 **twixter.store** 添加 A 记录，指向服务器公网 IP：
 
-| 类型 | 主机记录 | 记录值 | 说明 |
-|------|----------|--------|------|
-| A    | `@`      | `<SERVER_IP>` | 根域名 twixter.store |
-| A    | `www`    | `<SERVER_IP>` | www.twixter.store（前端） |
+| 类型 | 主机记录 | 记录值        | 说明                          |
+| ---- | -------- | ------------- | ----------------------------- |
+| A    | `@`      | `<SERVER_IP>` | 根域名 twixter.store          |
+| A    | `www`    | `<SERVER_IP>` | www.twixter.store（前端）     |
 | A    | `api`    | `<SERVER_IP>` | api.twixter.store（后端 API） |
 
 保存后等待 DNS 生效（几分钟到几小时不等）。可用 `dig api.twixter.store +short` 或 `nslookup api.twixter.store` 验证是否已解析到 `<SERVER_IP>`。
@@ -671,7 +674,6 @@ cd twixter.store
 
 2. **Ingress 使用真实域名**  
    将 Ingress 中的 `api.twixter.local` / `www.twixter.local` 改为真实域名：
-
    - 编辑 `backend/k8s/ingress.yaml`：把 `host: api.twixter.local` 改为 `host: api.twixter.store`；若启用 TLS，取消注释 `tls` 并设置 `secretName`（见步骤 5）。
    - 编辑 `frontend/k8s/ingress.yaml`：把 `host: www.twixter.local` 改为 `host: www.twixter.store`（或 `twixter.store`）；若启用 TLS，同上。
 
@@ -758,9 +760,10 @@ cd ..
 **Rocky Linux 8 / k3s：从 `.env` 加载变量再构建**  
 在 Rocky 8 上若使用 `frontend/k8s/.env` 存放 Stripe/PayPal 等 key，先加载再构建（与 Minikube 小节中的 bash 方式相同）。
 
-**前置条件（避免出现 “Stripe is not configured”）**  
-1. 必须在 **bash 或 Git Bash** 下执行下面命令（Windows 的 CMD 不支持 `set -a` 与 `. ./k8s/.env`，变量不会被加载）。  
-2. 在 `frontend/k8s/.env` 中**必须**有一行：`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx` 或 `pk_test_xxx`，**等号两边不要有空格**，且不要用引号包住整行。  
+**前置条件（避免出现 “Stripe is not configured”）**
+
+1. 必须在 **bash 或 Git Bash** 下执行下面命令（Windows 的 CMD 不支持 `set -a` 与 `. ./k8s/.env`，变量不会被加载）。
+2. 在 `frontend/k8s/.env` 中**必须**有一行：`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_xxx` 或 `pk_test_xxx`，**等号两边不要有空格**，且不要用引号包住整行。
 3. 构建前可在同一 shell 里执行 `echo "STRIPE_KEY length: ${#NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}"` 确认已加载（若为 0 说明未加载，需检查 .env 路径与格式）。
 
 ```bash
@@ -837,9 +840,10 @@ cd ..
      -n default
    ```
 
-   若 Secret 已存在需更新：`kubectl delete secret regcred -n default` 再执行上面其一，然后 
+   若 Secret 已存在需更新：`kubectl delete secret regcred -n default` 再执行上面其一，然后
    `kubectl rollout restart deployment/twixter-backend`
-   `kubectl rollout restart deployment/twixter-frontend`。
+   `kubectl rollout restart deployment/twixter-frontend`
+   `kubectl rollout restart deployment/twixter-backend deployment/twixter-frontend`。
 
 3. **一次性部署**（在仓库根目录）：
 
@@ -890,16 +894,16 @@ cd ..
 
 **k3s（Rocky Linux）浏览器打不开 api.twixter.store / www.twixter.store 时**
 
-1. **DNS / hosts**  
-   - 生产：`api.twixter.store`、`www.twixter.store` 的 A 记录指向 **k3s 节点公网 IP**（如 msd6200 的 IP）。  
+1. **DNS / hosts**
+   - 生产：`api.twixter.store`、`www.twixter.store` 的 A 记录指向 **k3s 节点公网 IP**（如 msd6200 的 IP）。
    - 本机调试：在**访问浏览器的电脑**上改 hosts，把上述域名指到 k3s 节点 IP（与 `kubectl get nodes -o wide` 里该节点 IP 或公网 IP 一致）。
 
 2. **Ingress Controller**  
-   当前 Ingress 使用 `ingressClassName: nginx`，k3s 默认是 **Traefik**。二选一：  
-   - **用 nginx**：按步骤 5 安装 nginx ingress 并禁用 Traefik；  
+   当前 Ingress 使用 `ingressClassName: nginx`，k3s 默认是 **Traefik**。二选一：
+   - **用 nginx**：按步骤 5 安装 nginx ingress 并禁用 Traefik；
    - **用 Traefik**：把 Ingress 的 `ingressClassName: nginx` 改为 `traefik`（或集群里实际 IngressClass 名），并去掉 nginx 专用 annotation，再 `kubectl apply`。
 
-3. **80/443 暴露与防火墙**  
+3. **80/443 暴露与防火墙**
    - nginx ingress 若为 **NodePort**（如 80:31916、443:31379），本机 `curl http://127.0.0.1/` 会得到 000（80 端口无进程监听）。要让浏览器用 **http://api.twixter.store**（80 端口）访问，需让控制器直接占用节点 80/443：在 **k3s 节点**上执行：
      ```bash
      kubectl patch deploy ingress-nginx-controller -n ingress-nginx --type=merge -p '{"spec":{"template":{"spec":{"hostNetwork":true,"dnsPolicy":"ClusterFirstWithHostNet"}}}}'
@@ -909,7 +913,7 @@ cd ..
      **若 rollout status 一直卡在 “1 old replicas are pending termination”**：新 Pod 可能 Pending，事件里常见 `didn't have free ports for the requested pod ports`，说明节点 80/443 已被占用（多为 **k3s 自带的 Traefik**）。  
      1）先**回滚**：`kubectl rollout undo deploy/ingress-nginx-controller -n ingress-nginx`，然后放行 NodePort 31916/31379，用 `http://api.twixter.store:31916/health`、`http://www.twixter.store:31916`。  
      2）若要坚持 hostNetwork 用 80/443：先释放节点 80/443。若 `sudo ss -tlnp | grep -E ':80|:443'` 显示 **httpd（Apache）** 在监听，可停用：`sudo systemctl stop httpd`（或 `sudo systemctl disable --now httpd`）。若为 **Traefik**：`kubectl get deploy -n kube-system -o name | grep traefik | xargs -r kubectl delete -n kube-system`。确认 80/443 无输出后，再执行上面的 `kubectl patch ... hostNetwork` 并 `rollout status`。  
-     3）若需**保留 Apache** 且用 80/443 访问站点：不要给 nginx ingress 开 hostNetwork；保持 NodePort（如 31916/31379），在 Apache 里配置**反向代理**，把 `api.twixter.store`、`www.twixter.store` 的 80/443 代理到 `http://127.0.0.1:31916` 和 `https://127.0.0.1:31379`（或仅 HTTP 代理到 31916），详见下方「Apache 反向代理到 NodePort」。  
+     3）若需**保留 Apache** 且用 80/443 访问站点：不要给 nginx ingress 开 hostNetwork；保持 NodePort（如 31916/31379），在 Apache 里配置**反向代理**，把 `api.twixter.store`、`www.twixter.store` 的 80/443 代理到 `http://127.0.0.1:31916` 和 `https://127.0.0.1:31379`（或仅 HTTP 代理到 31916），详见下方「Apache 反向代理到 NodePort」。
    - 若不想改控制器，可放行 NodePort 并用 `http://api.twixter.store:31916`、`https://www.twixter.store:31379`（需同时放行 31916、31379）。
    - **Apache 反向代理到 NodePort**（本机已用 httpd 占 80/443 时）：保持 nginx ingress 为 NodePort（80→31916，443→31379）。在 Apache 中为 `api.twixter.store`、`www.twixter.store` 建 VirtualHost，启用 `mod_proxy`、`mod_proxy_http`（HTTPS 时还有 `mod_ssl`、`mod_proxy_connect`），例如：
      ```apache
@@ -935,10 +939,10 @@ cd ..
    若 `kubectl get pods` 里 frontend 为 `0/1 Running` 或 Ingress 返回 **503**，说明 nginx 找不到就绪的前端 Pod。先查：`kubectl get pods -l app=twixter-frontend`、`kubectl get endpoints twixter-frontend`（无 addresses 即无 Ready Pod）。修前端：看日志 `kubectl logs deployment/twixter-frontend --tail=80`；若 OOM 则提高 `resources.limits.memory` 与探针 `initialDelaySeconds`，再 `kubectl apply -k frontend/k8s/` 并 `kubectl rollout restart deployment/twixter-frontend`。等 frontend 变为 1/1 Running 后再访问。
 
 5. **帖子页 500 / ECONNREFUSED（SSR 连不上后端）**  
-   若访问 `/en/post/10` 等出现 500 或 “fetch failed / ECONNREFUSED”，说明前端 Pod 内 **BACKEND_URL** 未注入或后端不可达。先确认：  
-   - ConfigMap 已应用且含 `BACKEND_URL`：`kubectl get configmap twixter-frontend-config -o yaml`（应有 `BACKEND_URL: "http://twixter-backend:8080"`）。  
-   - 前端 Pod 内实际值：`kubectl exec deployment/twixter-frontend -- env | grep BACKEND_URL`（**必须**为 `BACKEND_URL=http://twixter-backend:8080`；若为 `http://localhost:8080` 说明被 **Secret** 覆盖）。  
-   - 若被 Secret 覆盖：Deployment 的 `envFrom` 已改为先 Secret、后 ConfigMap，ConfigMap 优先。执行 `kubectl apply -k frontend/k8s/` 并 `kubectl rollout restart deployment/twixter-frontend`。或从 Secret 中删除 `BACKEND_URL`（Secret 只放敏感项如 Stripe key）。  
+   若访问 `/en/post/10` 等出现 500 或 “fetch failed / ECONNREFUSED”，说明前端 Pod 内 **BACKEND_URL** 未注入或后端不可达。先确认：
+   - ConfigMap 已应用且含 `BACKEND_URL`：`kubectl get configmap twixter-frontend-config -o yaml`（应有 `BACKEND_URL: "http://twixter-backend:8080"`）。
+   - 前端 Pod 内实际值：`kubectl exec deployment/twixter-frontend -- env | grep BACKEND_URL`（**必须**为 `BACKEND_URL=http://twixter-backend:8080`；若为 `http://localhost:8080` 说明被 **Secret** 覆盖）。
+   - 若被 Secret 覆盖：Deployment 的 `envFrom` 已改为先 Secret、后 ConfigMap，ConfigMap 优先。执行 `kubectl apply -k frontend/k8s/` 并 `kubectl rollout restart deployment/twixter-frontend`。或从 Secret 中删除 `BACKEND_URL`（Secret 只放敏感项如 Stripe key）。
    - 后端服务与 Pod 正常：`kubectl get svc twixter-backend`、`kubectl get pods -l app=twixter-backend`。
 
 6. **“Your connection isn’t secure” / TLS 证书无效**  
@@ -946,14 +950,14 @@ cd ..
 
 ### 生产部署小结（twixter.store）
 
-| 项目 | 本地/Minikube | 生产（twixter.store） |
-|------|----------------|------------------------|
-| 前端站点 | http://www.twixter.local | https://www.twixter.store |
-| 后端 API | http://api.twixter.local | https://api.twixter.store |
-| DNS | hosts 指向 Minikube IP | A 记录 @ / www / api → 服务器 IP |
-| TLS | 可选 | cert-manager + Let's Encrypt |
+| 项目         | 本地/Minikube                                | 生产（twixter.store）                         |
+| ------------ | -------------------------------------------- | --------------------------------------------- |
+| 前端站点     | http://www.twixter.local                     | https://www.twixter.store                     |
+| 后端 API     | http://api.twixter.local                     | https://api.twixter.store                     |
+| DNS          | hosts 指向 Minikube IP                       | A 记录 @ / www / api → 服务器 IP              |
+| TLS          | 可选                                         | cert-manager + Let's Encrypt                  |
 | 前端构建参数 | NEXT_PUBLIC_API_URL=http://api.twixter.local | NEXT_PUBLIC_API_URL=https://api.twixter.store |
-| Ingress host | api.twixter.local / www.twixter.local | api.twixter.store / www.twixter.store |
+| Ingress host | api.twixter.local / www.twixter.local        | api.twixter.store / www.twixter.store         |
 
 故障排查可参考上文「步骤 6：无法访问时的故障排查」；生产环境需额外确认数据库、Redis、Kafka、Stripe/PayPal 等均可从集群内访问，且 `backend/k8s/.env` 中为生产配置。
 
@@ -965,7 +969,6 @@ For Docker/Kubernetes and video processing details, see:
 - `backend/README.Kubernetes.md`
 - `frontend/README.Kubernetes.md` — frontend K8s (Next.js)
 - `backend/README.VIDEO_PROCESSING.md`
-
 
 ### 原因
 
@@ -998,9 +1001,11 @@ DB_SSLMODE=disable
 Postgres 默认只监听 `127.0.0.1`，Minikube 的 Pod 在别的网段，需要：
 
 - **postgresql.conf**：找到 `listen_addresses`，改成：
+
   ```conf
   listen_addresses = '*'
   ```
+
   或至少包含本机在 Minikube 网段上的 IP。
 
 - **pg_hba.conf**：加一行，允许 Minikube 网段访问（示例）：
