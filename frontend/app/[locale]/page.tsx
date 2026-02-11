@@ -8,6 +8,7 @@ import { getBaseUrlForMetadata } from "@/lib/metadata";
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 import { cookies } from "next/headers";
+import Link from "next/link";
 
 const SITE_NAME = "Twixter";
 
@@ -56,6 +57,18 @@ export default async function Home({ params, searchParams }: Props) {
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <SaveViewingFromUrl />
+      {!token && (
+        <div className="border-b border-[var(--border)] bg-[var(--accent)] px-4 py-3 text-center text-sm text-[var(--accent-foreground)]">
+          <span className="font-medium">Limited Time Offer: Sign up now to earn free credits</span>
+          {" · "}
+          <Link
+            href={`/${locale}/auth/signup?promo=freecredits`}
+            className="font-bold underline hover:no-underline"
+          >
+            Sign up now
+          </Link>
+        </div>
+      )}
       <div className="mx-auto flex max-w-[1280px]">
         <LeftSidebar locale={locale} />
         <main className="min-w-0 flex-1 border-x border-[var(--border)] md:max-w-[600px]">

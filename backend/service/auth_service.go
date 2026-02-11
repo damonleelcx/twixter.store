@@ -19,7 +19,7 @@ import (
 // AuthService Authentication service interface
 type AuthService interface {
 	// Registration and login
-	Register(email, password, ipAddress, username, referralCode string, accountType entity.AccountType) (*entity.UserBase, *entity.Session, error)
+	Register(email, password, ipAddress, username, referralCode string, accountType entity.AccountType, promoFreeCredits bool) (*entity.UserBase, *entity.Session, error)
 	Login(email, password, ipAddress, userAgent, deviceInfo string) (*entity.UserBase, *entity.Session, error)
 	Logout(sessionID uint) error
 	LogoutAll(userID uint) error
@@ -91,6 +91,9 @@ const (
 	// Referral configuration
 	ReferralRewardCredits = 20 // 推荐奖励积分数量
 	ReferralCodeLength    = 8  // 推荐码长度
+
+	// Signup promo (promo=freecredits)
+	SignupPromoCredits = 20 // 通过 promo=freecredits 注册赠送的积分数量
 )
 
 // hashPassword Hash password
@@ -154,7 +157,7 @@ func getJWTSecret() string {
 }
 
 // Register User registration
-func (s *authService) Register(email, password, ipAddress, username, referralCode string, accountType entity.AccountType) (*entity.UserBase, *entity.Session, error) {
+func (s *authService) Register(email, password, ipAddress, username, referralCode string, accountType entity.AccountType, promoFreeCredits bool) (*entity.UserBase, *entity.Session, error) {
 	// Check if email already exists
 	existingUser, err := s.userRepo.GetByEmailFromShard(email)
 	if err == nil && existingUser != nil {
@@ -282,6 +285,25 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 			}
 			if err := s.purchaseRepo.CreateInShard(*referredBy, referrerPurchase); err != nil {
 				return fmt.Errorf("failed to create referral purchase record: %w", err)
+			}
+		}
+
+		// If user signed up with promo=freecredits, grant 20 credits (update wallet in same tx; AddCredits would use a new tx and not see the just-created wallet)
+		if promoFreeCredits {
+			wallet.Balance += SignupPromoCredits
+			wallet.TotalEarned += SignupPromoCredits
+			if err := tx.Save(wallet).Error; err != nil {
+				return fmt.Errorf("failed to add signup promo credits: %w", err)
+			}
+			promoPurchase := &entity.PurchaseBase{
+				UserID:       userEntity.ID,
+				PurchaseType: entity.PurchaseTypeSignupPromo,
+				Status:       entity.PurchaseStatusCompleted,
+				Credits:      SignupPromoCredits,
+				Notes:        "Signup promo free credits",
+			}
+			if err := s.purchaseRepo.CreateInShard(userEntity.ID, promoPurchase); err != nil {
+				return fmt.Errorf("failed to create signup promo purchase record: %w", err)
 			}
 		}
 

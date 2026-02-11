@@ -23,12 +23,13 @@ func NewAuthController(authService service.AuthService) *AuthController {
 
 // RegisterRequest Registration request
 type RegisterRequest struct {
-	Email         string `json:"email" binding:"required,email"`
-	Password      string `json:"password" binding:"required,min=8"`
-	Username      string `json:"username,omitempty"`       // 用户名（可选）
-	ReferralCode  string `json:"referral_code,omitempty"`  // 推荐码（可选）
-	Viewing       string `json:"viewing,omitempty"`       // 明文查看类型（可选，与 viewing_token 二选一）
-	ViewingToken  string `json:"viewing_token,omitempty"` // 加密的 viewing token（可选，解密后用于账户类型）
+	Email            string `json:"email" binding:"required,email"`
+	Password         string `json:"password" binding:"required,min=8"`
+	Username         string `json:"username,omitempty"`           // 用户名（可选）
+	ReferralCode     string `json:"referral_code,omitempty"`      // 推荐码（可选）
+	Viewing          string `json:"viewing,omitempty"`             // 明文查看类型（可选，与 viewing_token 二选一）
+	ViewingToken     string `json:"viewing_token,omitempty"`      // 加密的 viewing token（可选，解密后用于账户类型）
+	PromoFreeCredits bool   `json:"promo_freecredits,omitempty"`   // 是否通过 promo=freecredits 注册（注册即送 20 积分）
 }
 
 // LoginRequest Login request
@@ -97,7 +98,7 @@ func (ac *AuthController) Register(c *gin.Context) {
 		accountType = entity.AccountTypeLight
 	}
 
-	user, session, err := ac.authService.Register(req.Email, req.Password, ipAddress, req.Username, req.ReferralCode, accountType)
+	user, session, err := ac.authService.Register(req.Email, req.Password, ipAddress, req.Username, req.ReferralCode, accountType, req.PromoFreeCredits)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		if err.Error() == "email already registered" {
