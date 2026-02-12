@@ -1,3 +1,5 @@
+import { getViewingCookie, getViewingFromSearchParams } from "@/lib/viewing";
+
 const AUTH_TOKEN_KEY = "twixter_access_token";
 const REFRESH_TOKEN_KEY = "twixter_refresh_token";
 /** Cookie name for access token (used for SSR; set when client stores token). */
@@ -597,7 +599,7 @@ function feedSortToParams(sort: FeedSort): { sort: string; free_only?: string } 
   return { sort };
 }
 
-/** Fetch content feed by category. Optional auth (token sent when available). Dark requires can_view_nsfw. */
+/** Fetch content feed by category. Optional auth (token sent when available). Dark requires can_view_nsfw or viewing_dark cookie/param. */
 export async function fetchContentFeed(
   category: "light" | "dark",
   cursor: number,
@@ -613,12 +615,21 @@ export async function fetchContentFeed(
     sort: sortParam,
   });
   if (freeOnly) params.set("free_only", freeOnly);
+  // Unauthenticated dark list: backend allows cookie or ?viewing= (encrypted viewing_dark token)
+  if (category === "dark") {
+    const viewing =
+      getViewingCookie() ||
+      (typeof window !== "undefined"
+        ? getViewingFromSearchParams(new URLSearchParams(window.location.search))
+        : null);
+    if (viewing) params.set("viewing", viewing);
+  }
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   const res = await fetchWithTimeout(
     `${base}/content/list?${params}`,
-    { headers, cache: "no-store" },
+    { headers, cache: "no-store", credentials: "include" },
     15_000
   );
   const data = await res.json().catch(() => ({}));
@@ -653,7 +664,7 @@ export async function fetchContentFeedByTag(
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   const res = await fetchWithTimeout(
     `${base}/content/list?${params}`,
-    { headers, cache: "no-store" },
+    { headers, cache: "no-store", credentials: "include" },
     15_000
   );
   const data = await res.json().catch(() => ({}));
@@ -685,12 +696,20 @@ export async function fetchContentFeedSearch(
   if (freeOnly) params.set("free_only", freeOnly);
   if (q.trim()) params.set("q", q.trim());
   if (category) params.set("category", category);
+  if (category === "dark") {
+    const viewing =
+      getViewingCookie() ||
+      (typeof window !== "undefined"
+        ? getViewingFromSearchParams(new URLSearchParams(window.location.search))
+        : null);
+    if (viewing) params.set("viewing", viewing);
+  }
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   const res = await fetchWithTimeout(
     `${base}/content/list?${params}`,
-    { headers, cache: "no-store" },
+    { headers, cache: "no-store", credentials: "include" },
     15_000
   );
   const data = await res.json().catch(() => ({}));
@@ -855,13 +874,14 @@ export async function fetchTrendingTagsServer(
   }
 }
 
-/** Server-side fetch for content feed. Pass token from cookie when user is signed in so purchased is correct. */
+/** Server-side fetch for content feed. Pass token from cookie when user is signed in so purchased is correct. For dark category without auth, pass viewingToken (twixter_viewing cookie value) so backend can allow via viewing_dark. */
 export async function fetchContentFeedServer(
   category: "light" | "dark",
   cursor: number,
   limit = 20,
   token?: string | null,
-  sort: FeedSort = "created_at"
+  sort: FeedSort = "created_at",
+  viewingToken?: string | null
 ): Promise<ContentFeedResponse> {
   const base = getServerApiBase();
   if (!base) return { items: [], next_cursor: 0, has_more: false };
@@ -873,6 +893,7 @@ export async function fetchContentFeedServer(
     sort: sortParam,
   });
   if (freeOnly) params.set("free_only", freeOnly);
+  if (category === "dark" && viewingToken) params.set("viewing", viewingToken);
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   const res = await fetchWithTimeout(

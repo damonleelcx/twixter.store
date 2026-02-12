@@ -1,7 +1,6 @@
 "use client";
 
-import type { ContentFeedResponse } from "@/lib/api";
-import type { FeedSort } from "@/lib/api";
+import type { ContentFeedResponse, FeedSort } from "@/lib/api";
 import { fetchCurrentUser } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import { ComposeBox } from "./ComposeBox";
