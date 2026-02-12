@@ -845,6 +845,12 @@ cd ..
    `kubectl rollout restart deployment/twixter-frontend`
    `kubectl rollout restart deployment/twixter-backend deployment/twixter-frontend`。
 
+   Logs:
+   `kubectl logs deployment/twixter-backend --tail=1000`
+   `kubectl logs deployment/twixter-backend -f`
+   `kubectl logs deployment/twixter-frontend --tail=1000`
+   `kubectl logs deployment/twixter-frontend -f`
+
 3. **一次性部署**（在仓库根目录）：
 
    ```bash

@@ -17,7 +17,6 @@ export function ComposeBox({ sort, onSortChange }: ComposeBoxProps) {
   const locale = (params?.locale as string) || "en";
   const tFeed = useTranslations("feed");
   const tAuth = useTranslations("auth");
-  const [composeText, setComposeText] = useState("");
   const [user, setUser] = useState<Awaited<ReturnType<typeof fetchCurrentUser>>>(null);
 
   useEffect(() => {
@@ -95,31 +94,10 @@ export function ComposeBox({ sort, onSortChange }: ComposeBoxProps) {
     </div>
   );
 
-  if (!isLoggedIn) {
-    return (
-      <div className="border-b border-[var(--border)] px-4 py-3">
-        {sortRow}
-      </div>
-    );
-  }
-
+  // After sign up: no "What is happening?!" compose area; sort + post buttons at top only
   return (
-    <div className="flex gap-3 border-b border-[var(--border)] p-4">
-      <div className="h-10 w-10 shrink-0 rounded-full bg-[var(--muted)]/30 flex items-center justify-center">
-        <span className="text-sm font-semibold text-[var(--muted)]">U</span>
-      </div>
-      <div className="min-w-0 flex-1">
-        <textarea
-          placeholder={tFeed("composePlaceholder")}
-          value={composeText}
-          onChange={(e) => setComposeText(e.target.value)}
-          className="w-full resize-none border-none bg-transparent py-3 text-[20px] placeholder:text-[var(--muted)] focus:outline-none"
-          rows={2}
-        />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-[var(--border)] pt-3">
-          {sortRow}
-        </div>
-      </div>
+    <div className="border-b border-[var(--border)] px-4 py-3">
+      {sortRow}
     </div>
   );
 }
