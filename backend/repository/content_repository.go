@@ -21,11 +21,11 @@ type ContentRepository interface {
 	GetByStatus(status entity.ContentStatus, limit, offset int) ([]entity.Content, error)
 	GetPublic(limit, offset int) ([]entity.Content, error)
 	GetByCategory(category string, limit, offset int) ([]entity.Content, error)
-	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）。sortBy: "view_count" 或 "created_at"（默认）
-	ListFeedByCategory(category string, limit, offset int, sortBy string) ([]entity.Content, error)
+	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
+	ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
 	Search(keyword string, limit, offset int) ([]entity.Content, error)
-	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类。sortBy: "view_count" 或 "created_at"（默认）
-	SearchReady(keyword string, category string, limit, offset int, sortBy string) ([]entity.Content, error)
+	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
+	SearchReady(keyword string, category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
 
 	// 统计操作
 	Count() (int64, error)
@@ -143,11 +143,14 @@ func orderByClause(sortBy string) string {
 	}
 }
 
-// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）
-func (r *contentRepository) ListFeedByCategory(category string, limit, offset int, sortBy string) ([]entity.Content, error) {
+// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）；freeOnly 为 true 时仅返回 price=0 的免费内容
+func (r *contentRepository) ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
 	var contents []entity.Content
-	query := r.db.Where("category = ? AND status = ?", category, entity.ContentStatusReady).
-		Limit(limit).Offset(offset).Order(orderByClause(sortBy))
+	query := r.db.Where("category = ? AND status = ?", category, entity.ContentStatusReady)
+	if freeOnly {
+		query = query.Where("price = ?", 0)
+	}
+	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}
@@ -165,8 +168,8 @@ func (r *contentRepository) Search(keyword string, limit, offset int) ([]entity.
 	return contents, nil
 }
 
-// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类
-func (r *contentRepository) SearchReady(keyword string, category string, limit, offset int, sortBy string) ([]entity.Content, error) {
+// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类；freeOnly 为 true 时仅返回 price=0 的免费内容
+func (r *contentRepository) SearchReady(keyword string, category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("status = ?", entity.ContentStatusReady)
 	if keyword != "" {
@@ -174,6 +177,9 @@ func (r *contentRepository) SearchReady(keyword string, category string, limit, 
 	}
 	if category != "" && (category == "light" || category == "dark") {
 		query = query.Where("category = ?", category)
+	}
+	if freeOnly {
+		query = query.Where("price = ?", 0)
 	}
 	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy))
 	if err := query.Find(&contents).Error; err != nil {
