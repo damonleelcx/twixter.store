@@ -168,6 +168,17 @@ export function SearchOrTagFeedList(props: SearchOrTagFeedListProps) {
           >
             {tFeed("sortByViewCount")}
           </button>
+          <button
+            type="button"
+            onClick={() => setSort("free")}
+            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+              sort === "free"
+                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {tFeed("sortByFree")}
+          </button>
         </div>
       </div>
       {items.map((item) => (

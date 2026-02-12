@@ -588,8 +588,14 @@ export type ContentFeedResponse = {
   has_more: boolean;
 };
 
-/** Sort option for feed list: by upload date (default) or view count. */
-export type FeedSort = "created_at" | "view_count";
+/** Sort option for feed list: by upload date, view count, or free content only (0 credits). */
+export type FeedSort = "created_at" | "view_count" | "free";
+
+/** Resolve API sort param: when "free" we still order by created_at and pass free_only=1. */
+function feedSortToParams(sort: FeedSort): { sort: string; free_only?: string } {
+  if (sort === "free") return { sort: "created_at", free_only: "1" };
+  return { sort };
+}
 
 /** Fetch content feed by category. Optional auth (token sent when available). Dark requires can_view_nsfw. */
 export async function fetchContentFeed(
@@ -599,12 +605,14 @@ export async function fetchContentFeed(
   sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
+  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     category,
     cursor: String(cursor),
     limit: String(limit),
-    sort,
+    sort: sortParam,
   });
+  if (freeOnly) params.set("free_only", freeOnly);
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
@@ -632,12 +640,14 @@ export async function fetchContentFeedByTag(
   sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
+  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     tag: tag.trim(),
     cursor: String(cursor),
     limit: String(limit),
-    sort,
+    sort: sortParam,
   });
+  if (freeOnly) params.set("free_only", freeOnly);
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
@@ -666,11 +676,13 @@ export async function fetchContentFeedSearch(
   sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
+  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     cursor: String(cursor),
     limit: String(limit),
-    sort,
+    sort: sortParam,
   });
+  if (freeOnly) params.set("free_only", freeOnly);
   if (q.trim()) params.set("q", q.trim());
   if (category) params.set("category", category);
   const headers: HeadersInit = {};
@@ -853,12 +865,14 @@ export async function fetchContentFeedServer(
 ): Promise<ContentFeedResponse> {
   const base = getServerApiBase();
   if (!base) return { items: [], next_cursor: 0, has_more: false };
+  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     category,
     cursor: String(cursor),
     limit: String(limit),
-    sort,
+    sort: sortParam,
   });
+  if (freeOnly) params.set("free_only", freeOnly);
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   const res = await fetchWithTimeout(

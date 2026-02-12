@@ -44,7 +44,8 @@
     "sharePremiumLink": "分享高端内容链接",
     "sortBy": "排序",
     "sortByViewCount": "观看次数",
-    "sortByUploadDate": "上传时间"
+    "sortByUploadDate": "上传时间",
+    "sortByFree": "免费"
   },
   "compose": {
     "media": "媒体",

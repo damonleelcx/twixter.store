@@ -18,8 +18,8 @@ type ContentTagRepository interface {
 	RemoveTagFromContent(contentID, tagID uint) error
 	GetTagsByContentID(contentID uint) ([]entity.Tag, error)
 	GetContentsByTagID(tagID uint, limit, offset int) ([]entity.Content, error)
-	// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）。sortBy: "view_count" 或 "created_at"（默认）
-	GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string) ([]entity.Content, error)
+	// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
+	GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
 
 	// 批量操作
 	AddTagsToContent(contentID uint, tagIDs []uint) error
@@ -136,13 +136,16 @@ func orderByContentsClause(sortBy string) string {
 	}
 }
 
-// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）
-func (r *contentTagRepository) GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string) ([]entity.Content, error) {
+// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）；freeOnly 为 true 时仅返回 price=0 的免费内容
+func (r *contentTagRepository) GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Table("contents").
 		Joins("INNER JOIN content_tags ON contents.id = content_tags.content_id").
-		Where("content_tags.tag_id = ? AND content_tags.deleted_at IS NULL AND contents.status = ? AND contents.deleted_at IS NULL", tagID, entity.ContentStatusReady).
-		Limit(limit).Offset(offset).Order(orderByContentsClause(sortBy))
+		Where("content_tags.tag_id = ? AND content_tags.deleted_at IS NULL AND contents.status = ? AND contents.deleted_at IS NULL", tagID, entity.ContentStatusReady)
+	if freeOnly {
+		query = query.Where("contents.price = ?", 0)
+	}
+	query = query.Limit(limit).Offset(offset).Order(orderByContentsClause(sortBy))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}

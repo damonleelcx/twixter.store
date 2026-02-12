@@ -44,7 +44,8 @@
     "sharePremiumLink": "Share premium link",
     "sortBy": "Sort by",
     "sortByViewCount": "View count",
-    "sortByUploadDate": "Upload date"
+    "sortByUploadDate": "Upload date",
+    "sortByFree": "Free"
   },
   "compose": {
     "media": "Media",
