@@ -1,6 +1,7 @@
 # Binary
 *.exe
 backend
+main
 /bin/
 
 # Env (secrets)
