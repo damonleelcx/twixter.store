@@ -1,3 +1,4 @@
+import { ChatFab } from "@/components/ChatFab";
 import { routing } from "@/i18n/routing";
 import { getBaseUrlForMetadata } from "@/lib/metadata";
 import type { Metadata } from "next";
@@ -87,6 +88,7 @@ export default async function LocaleLayout({ children, params }: Props) {
         <NextIntlClientProvider messages={messages} locale={locale}>
           <SetLocaleLang locale={locale} />
           {children}
+          <ChatFab />
         </NextIntlClientProvider>
       </body>
     </html>

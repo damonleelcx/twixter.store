@@ -8,6 +8,7 @@
     "explore": "Explore",
     "notifications": "Notifications",
     "messages": "Messages",
+    "chat": "Chat",
     "library": "Library",
     "bookmarks": "Bookmarks",
     "profile": "Profile",
@@ -15,6 +16,20 @@
     "adminUpload": "Admin Upload",
     "adminAnalytics": "Analytics",
     "subscribe": "Subscribe"
+  },
+  "chat": {
+    "loading": "Loading...",
+    "accessDenied": "You don't have access to chat. Only dark or admin accounts can use the agent.",
+    "onboardingTitle": "Set up your agent",
+    "onboardingHint": "Give your agent a name and personality so it stays in character.",
+    "agentName": "Agent name",
+    "agentNamePlaceholder": "e.g. Luna",
+    "personality": "Personality",
+    "saveAndStart": "Save and start chatting",
+    "creditPerMessage": "1 credit per message",
+    "balance": "Balance",
+    "messagePlaceholder": "Type a message...",
+    "retry": "Retry"
   },
   "library": {
     "empty": "No purchased content yet.",
@@ -271,7 +286,9 @@
     "adminVideoAnalyticsTitle": "Video Analytics | Twixter",
     "adminVideoAnalyticsDescription": "View video analytics and top contents.",
     "adminRevenueAnalyticsTitle": "Revenue Analytics | Twixter",
-    "adminRevenueAnalyticsDescription": "View content and credits revenue."
+    "adminRevenueAnalyticsDescription": "View content and credits revenue.",
+    "chatTitle": "Chat | Twixter",
+    "chatDescription": "Agent chat. 1 credit per message."
   },
   "admin": {
     "analytics": {

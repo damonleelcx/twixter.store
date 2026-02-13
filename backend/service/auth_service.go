@@ -309,8 +309,8 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 
 		// Grant permissions based on account type
 		if accountType == entity.AccountTypeDark {
-			// Dark account: grant can_view_nsfw and can_search_tags permissions
-			for _, permName := range []string{"can_view_nsfw", "can_search_tags"} {
+			// Dark account: grant can_view_nsfw, can_search_tags, can_use_bot
+			for _, permName := range []string{"can_view_nsfw", "can_search_tags", "can_use_bot"} {
 				var permission entity.Permission
 				if err := tx.Where("name = ?", permName).First(&permission).Error; err != nil {
 					return fmt.Errorf("failed to get %s permission: %w", permName, err)

@@ -31,11 +31,13 @@ export function LeftSidebar({ locale }: LeftSidebarProps) {
 
   const canUpload = Boolean(user?.permissions?.includes("can_upload_content"));
   const canViewAnalytics = Boolean(user?.permissions?.includes("can_view_analytics"));
+  const canUseBot = Boolean(user?.permissions?.includes("can_use_bot"));
   const isLoggedIn = user != null;
 
   const items = navItems.filter((item) => {
     if (item.key === "adminUpload") return canUpload;
     if (item.key === "adminAnalytics") return canViewAnalytics;
+    if (item.key === "chat") return canUseBot;
     return true;
   });
 
@@ -67,17 +69,19 @@ export function LeftSidebar({ locale }: LeftSidebarProps) {
                 ? `/${locale}`
                 : item.key === "explore"
                   ? `/${locale}/explore`
-                  : item.key === "adminUpload"
-                    ? `/${locale}/admin/upload`
-                    : item.key === "adminAnalytics"
-                      ? `/${locale}/admin/analytics`
-                      : item.key === "profile"
-                      ? `/${locale}/profile`
-                      : item.key === "bookmarks"
-                        ? `/${locale}/bookmarks`
-                        : item.key === "library"
-                          ? `/${locale}/library`
-                          : undefined
+                  : item.key === "chat"
+                    ? `/${locale}/chat`
+                    : item.key === "adminUpload"
+                      ? `/${locale}/admin/upload`
+                      : item.key === "adminAnalytics"
+                        ? `/${locale}/admin/analytics`
+                        : item.key === "profile"
+                          ? `/${locale}/profile`
+                          : item.key === "bookmarks"
+                            ? `/${locale}/bookmarks`
+                            : item.key === "library"
+                              ? `/${locale}/library`
+                              : undefined
             }
           />
         ))}

@@ -1,0 +1,46 @@
+# 自托管 LLM 推理（如 llama.cpp server）；可选，未部署时聊天接口返回占位文案
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm
+  namespace: default
+  labels:
+    app: llm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm
+  template:
+    metadata:
+      labels:
+        app: llm
+    spec:
+      containers:
+        - name: llm
+          # 示例：ghcr.io/ggerganov/llama.cpp 或自建镜像（见 deploy/LLM_DOCKERFILE.md）
+          image: ghcr.io/ggerganov/llama.cpp:latest
+          args:
+            - "./server"
+            - "-m"
+            - "/models/model.gguf"
+            - "--port"
+            - "8081"
+          ports:
+            - containerPort: 8081
+              name: http
+          resources:
+            limits:
+              cpu: "8"
+              memory: "32Gi"
+            requests:
+              cpu: "4"
+              memory: "16Gi"
+          # 若模型通过 PVC 挂载，取消注释并创建对应 PVC
+          # volumeMounts:
+          #   - name: model
+          #     mountPath: /models
+      # volumes:
+      #   - name: model
+      #     persistentVolumeClaim:
+      #       claimName: llm-models-pvc

@@ -11,6 +11,10 @@ resources:
   - kafka-service.yaml
   - redis-deployment.yaml
   - redis-service.yaml
+  - mongodb-statefulset.yaml
+  - mongodb-service.yaml
+  - llm-deployment.yaml
+  - llm-service.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml

@@ -24,6 +24,7 @@ Kustomize 的 `secretGenerator` 读取的是 **本目录下的 `.env`**，即 **
    ```
    其中 `FRONTEND_URL` 用于密码重置邮件中的链接；`SMTP_*` 用于发送密码重置邮件（可选，未配置时仅打印 token 不发邮件）。若使用 465 端口隐式 TLS，可设置 `SMTP_PORT=465` 和 `SMTP_USE_TLS=1`。
    若使用集群内 Kafka（`kubectl apply -k k8s/` 会部署 Zookeeper 与 Kafka），必须设置 `KAFKA_BROKERS=kafka:9092`，否则后端会使用默认 `localhost:9092` 导致连接失败。
+   **聊天**：MongoDB 与 LLM 由 ConfigMap 提供（`MONGO_URI`、`LLM_ENDPOINT`），一般无需在 `.env` 中再写；若需覆盖可在此设置。
    若你平时只维护 `backend/.env`，可先复制一份到本目录再改：
    ```bash
    cp backend/.env backend/k8s/.env

@@ -371,6 +371,92 @@ export async function capturePayPalOrder(orderID: string): Promise<{ status: str
   return data;
 }
 
+// --- Agent Chat (requires can_use_bot; 1 credit per message) ---
+
+export type ChatPersonality = {
+  tone: string;
+  speaking_style: string;
+  boundaries: string;
+  quirks: string[];
+  emotional_range: string;
+};
+
+export type ChatSessionResponse = {
+  need_onboarding: boolean;
+  session_id?: string;
+  persona?: { id: number; name: string; personality: ChatPersonality };
+  messages?: { role: string; content: string; created_at: string }[];
+};
+
+/** Get chat session state. If need_onboarding, show name + personality form first. */
+export async function getChatSession(sessionId?: string): Promise<ChatSessionResponse> {
+  const base = getApiBase();
+  const url = sessionId ? `${base}/chat/session?session_id=${encodeURIComponent(sessionId)}` : `${base}/chat/session`;
+  const res = await fetchWithAuth(url);
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 403) throw new Error("You don't have access to chat.");
+  if (!res.ok) throw new Error((data?.error as string) || "Failed to load chat session");
+  return data;
+}
+
+/** Submit agent name and personality (onboarding). */
+export async function postChatOnboarding(name: string, personality: ChatPersonality): Promise<void> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/chat/onboarding`, {
+    method: "POST",
+    body: JSON.stringify({ name, personality }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 403) throw new Error("You don't have access to chat.");
+  if (!res.ok) throw new Error((data?.error as string) || "Failed to save");
+}
+
+/** Send a message and stream assistant reply via SSE. Consumes 1 credit. */
+export async function postChatStream(
+  sessionId: string,
+  message: string,
+  onChunk: (text: string) => void
+): Promise<void> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, message }),
+  });
+  if (res.status === 402) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.message || "1 credit per message. Please add credits.");
+  }
+  if (res.status === 428) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.message || "Please complete onboarding first.");
+  }
+  if (res.status === 403) throw new Error("You don't have access to chat.");
+  if (!res.ok) throw new Error("Failed to send message");
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response body");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const payload = line.slice(6).replace(/\\n/g, "\n");
+          if (payload.startsWith("[ERROR] ")) continue;
+          onChunk(payload);
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /** Call backend logout to revoke current session. Safe to call even without token. */
 export async function authApiLogout(): Promise<void> {
   const base = getApiBase();

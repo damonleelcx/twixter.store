@@ -10,10 +10,12 @@ metadata:
   annotations:
     # minikube 使用 nginx ingress
     nginx.ingress.kubernetes.io/proxy-body-size: "100gb"
+    # SSE 流式聊天：禁止缓冲，否则 /api/chat/stream 会卡住
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     # cert-manager 自动签发证书（需先安装 cert-manager 并创建 ClusterIssuer letsencrypt-prod）
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
 spec:
   ingressClassName: nginx
   rules:

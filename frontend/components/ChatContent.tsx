@@ -1,0 +1,273 @@
+"use client";
+
+import {
+  getChatSession,
+  postChatOnboarding,
+  postChatStream,
+  type ChatPersonality,
+  type ChatSessionResponse,
+  fetchCurrentUser,
+} from "@/lib/api";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "./Icon";
+
+const defaultPersonality: ChatPersonality = {
+  tone: "confident, playful",
+  speaking_style: "short teasing sentences",
+  boundaries: "never breaks character",
+  quirks: ["sarcastic humor", "slow reveals"],
+  emotional_range: "intimate but controlled",
+};
+
+export function ChatContent() {
+  const t = useTranslations("chat");
+  const [state, setState] = useState<
+    "loading" | "denied" | "onboarding" | "ready" | "error"
+  >("loading");
+  const [session, setSession] = useState<ChatSessionResponse | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [personality, setPersonality] = useState<ChatPersonality>(defaultPersonality);
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState("");
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const loadSession = useCallback(async (sessionId?: string) => {
+    setState("loading");
+    setErrorMsg(null);
+    try {
+      const data = await getChatSession(sessionId ?? session?.session_id);
+      setSession(data);
+      if (data.need_onboarding) {
+        setState("onboarding");
+      } else {
+        setState("ready");
+        setMessages(data.messages?.map((m) => ({ role: m.role, content: m.content })) ?? []);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("don't have access") || msg.includes("403")) {
+        setState("denied");
+      } else {
+        setState("error");
+        setErrorMsg(msg);
+      }
+    }
+  }, [session?.session_id]);
+
+  useEffect(() => {
+    loadSession();
+  }, []);
+
+  useEffect(() => {
+    if (state === "ready" || state === "onboarding") {
+      fetchCurrentUser().then((u) => {
+        if (u?.wallet_balance != null) setWalletBalance(u.wallet_balance);
+      });
+    }
+  }, [state]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streamingContent]);
+
+  const handleOnboarding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setErrorMsg(null);
+    try {
+      await postChatOnboarding(name.trim(), personality);
+      await loadSession(session?.session_id);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || streaming || !session?.session_id) return;
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setStreaming(true);
+    setStreamingContent("");
+    try {
+      let full = "";
+      await postChatStream(session.session_id, text, (chunk) => {
+        full += chunk;
+        setStreamingContent(full);
+      });
+      setMessages((prev) => [...prev, { role: "assistant", content: full }]);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStreaming(false);
+      setStreamingContent("");
+    }
+  };
+
+  if (state === "loading") {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <span className="text-[var(--muted)]">{t("loading")}</span>
+      </div>
+    );
+  }
+  if (state === "denied") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+        <p className="text-[var(--muted)]">{t("accessDenied")}</p>
+      </div>
+    );
+  }
+  if (state === "error") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+        <p className="text-red-500">{errorMsg}</p>
+        <button
+          type="button"
+          onClick={() => loadSession()}
+          className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground)]"
+        >
+          {t("retry")}
+        </button>
+      </div>
+    );
+  }
+  if (state === "onboarding") {
+    return (
+      <div className="flex flex-1 flex-col p-4 md:p-6">
+        <h2 className="mb-4 text-lg font-semibold">{t("onboardingTitle")}</h2>
+        <p className="mb-4 text-sm text-[var(--muted)]">{t("onboardingHint")}</p>
+        <form onSubmit={handleOnboarding} className="flex flex-col gap-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">{t("agentName")}</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              placeholder={t("agentNamePlaceholder")}
+              required
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">{t("personality")}</label>
+            <div className="grid gap-2 text-sm">
+              <input
+                type="text"
+                value={personality.tone}
+                onChange={(e) => setPersonality((p) => ({ ...p, tone: e.target.value }))}
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+                placeholder="tone"
+              />
+              <input
+                type="text"
+                value={personality.speaking_style}
+                onChange={(e) => setPersonality((p) => ({ ...p, speaking_style: e.target.value }))}
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+                placeholder="speaking_style"
+              />
+              <input
+                type="text"
+                value={personality.boundaries}
+                onChange={(e) => setPersonality((p) => ({ ...p, boundaries: e.target.value }))}
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+                placeholder="boundaries"
+              />
+              <input
+                type="text"
+                value={personality.quirks.join(", ")}
+                onChange={(e) =>
+                  setPersonality((p) => ({
+                    ...p,
+                    quirks: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                  }))
+                }
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+                placeholder="quirks (comma-separated)"
+              />
+              <input
+                type="text"
+                value={personality.emotional_range}
+                onChange={(e) => setPersonality((p) => ({ ...p, emotional_range: e.target.value }))}
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+                placeholder="emotional_range"
+              />
+            </div>
+          </div>
+          {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
+          <button
+            type="submit"
+            className="rounded-full bg-[var(--accent)] px-6 py-3 font-bold text-[var(--accent-foreground)] hover:opacity-90"
+          >
+            {t("saveAndStart")}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="border-b border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)]">
+        {t("creditPerMessage")} · {t("balance")}: {walletBalance ?? "—"}
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className={`max-w-[85%] rounded-2xl px-4 py-2 ${
+                m.role === "user"
+                  ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+                  : "bg-[var(--hover)]"
+              }`}
+            >
+              <p className="whitespace-pre-wrap text-sm">{m.content}</p>
+            </div>
+          </div>
+        ))}
+        {streamingContent && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] rounded-2xl bg-[var(--hover)] px-4 py-2">
+              <p className="whitespace-pre-wrap text-sm">{streamingContent}</p>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+      {errorMsg && (
+        <div className="border-t border-[var(--border)] bg-red-500/10 px-4 py-2 text-sm text-red-600 dark:text-red-400">
+          {errorMsg}
+        </div>
+      )}
+      <div className="border-t border-[var(--border)] p-4">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+            placeholder={t("messagePlaceholder")}
+            className="min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            disabled={streaming}
+          />
+          <button
+            type="button"
+            onClick={sendMessage}
+            disabled={streaming || !input.trim()}
+            className="shrink-0 rounded-full bg-[var(--accent)] p-3 text-[var(--accent-foreground)] hover:opacity-90 disabled:opacity-50"
+          >
+            <Icon d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" className="h-6 w-6" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
