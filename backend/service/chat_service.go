@@ -91,6 +91,7 @@ func (s *ChatService) BuildPrompt(persona *entity.ChatPersona, messages []store.
 		sb.WriteString("Name: " + persona.Name + "\n")
 		sb.WriteString("Personality (JSON): " + string(persona.Personality) + "\n\n")
 	}
+	sb.WriteString("Rules: Do not suggest the user chat elsewhere or include links to external chat pages. Never say things like \"If you want to chat with [name], you can do so here\" or include share links.\n\n")
 	sb.WriteString("Conversation:\n")
 	for _, m := range messages {
 		sb.WriteString(m.Role + ": " + m.Content + "\n")

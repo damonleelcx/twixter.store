@@ -1,4 +1,5 @@
 # Redis 单实例，供 Minikube/本地 K8s 使用；生产建议用托管 Redis 或 Helm
+# 若 Redis 常被 SIGTERM 终止，多为集群自愿驱逐（如 drain、apply 触发的替换）；已加 redis-pdb 减少此类情况
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,6 +17,7 @@ spec:
       labels:
         app: redis
     spec:
+      # 尽量不因节点资源压力被优先驱逐（与 PDB 配合）
       containers:
         - name: redis
           image: redis:7-alpine
@@ -24,8 +26,8 @@ spec:
               name: redis
           resources:
             requests:
-              memory: "64Mi"
-              cpu: "50m"
+              memory: "128Mi"
+              cpu: "100m"
             limits:
               memory: "256Mi"
               cpu: "200m"

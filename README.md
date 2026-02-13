@@ -248,14 +248,28 @@ kubectl apply -k k8s/
 
 若 `http://api.twixter.local/health` 或 `http://www.twixter.local` 无响应，按下面顺序检查。
 
+**0. 先区分集群：Minikube 还是 k3s**
+
+- **Minikube**：用下面「1. hosts」里的 `minikube ip`，且 Windows 上通常还需 **`minikube tunnel`**（管理员终端、保持不关）才能访问 80 端口。
+- **k3s**：用下面「1.1 k3s：hosts 与入口」；Ingress 使用 `ingressClassName: nginx`，集群内需已安装 **nginx ingress**（k3s 默认是 Traefik，不匹配则 Ingress 不生效）。
+
 **1. 确认 hosts 已配置**
 
-- 执行 `minikube ip` 得到当前 Minikube IP（如 `192.168.49.2`）。
-- 在本机 hosts 中必须有（把 `<MINIKUBE_IP>` 换成实际 IP）：
-  - `<MINIKUBE_IP>/127.0.0.1 api.twixter.local`
-  - `<MINIKUBE_IP>/127.0.0.1 www.twixter.local`
+- **Minikube**：执行 `minikube ip` 得到当前 Minikube IP（如 `192.168.49.2`）。在本机 hosts 中必须有（把 `<IP>` 换成该 IP）：
+  - `<IP> api.twixter.local`
+  - `<IP> www.twixter.local`
 - Windows：`C:\Windows\System32\drivers\etc\hosts`（需管理员权限编辑）。
-- 在终端验证：`ping api.twixter.local` 应解析到 Minikube IP。
+- 在终端验证：`ping api.twixter.local` 应解析到上述 IP。
+
+**1.1 k3s：hosts 与 Ingress 入口**
+
+若集群是 **k3s**（不是 Minikube）：
+
+1. **hosts**：用 **k3s 节点 IP**（在 k3s 节点或能连集群的机器上执行 `kubectl get nodes -o wide`，取 INTERNAL-IP 或 EXTERNAL-IP）。在**访问浏览器的电脑**上编辑 hosts，添加：
+   - `<节点IP> api.twixter.local`
+   - `<节点IP> www.twixter.local`
+2. **Ingress Controller**：当前 Ingress 使用 `ingressClassName: nginx`。k3s 默认是 Traefik，需**安装 nginx ingress** 并让 80 端口在节点上可访问（若用裸机，LoadBalancer 常为 Pending，需改为 NodePort 或 hostNetwork，见本文「k3s 与 nginx Ingress」小节）。
+3. **验证**：在浏览器所在机器上 `ping api.twixter.local` 应解析到节点 IP；再访问 `http://api.twixter.local/health` 和 `http://www.twixter.local`。若仍不通，用端口转发先确认服务正常：`kubectl port-forward svc/twixter-backend 8080:8080` 与 `kubectl port-forward svc/twixter-frontend 3000:3000`，再访问 `http://localhost:8080/health` 和 `http://localhost:3000`。
 
 **1.1 ping 超时、主机无法访问 Minikube IP（常见于 Windows）**
 

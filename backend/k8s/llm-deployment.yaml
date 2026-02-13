@@ -1,4 +1,5 @@
 # 自托管 LLM 推理（如 llama.cpp server）；可选，未部署时聊天接口返回占位文案
+# GPU：请求 1 张 nvidia.com/gpu（使用调度到的节点本机 GPU，如 Minikube 本机 --gpus=all 即本机显卡）；无 GPU 节点时 Pod 会 Pending，可去掉 GPU 相关资源改跑 CPU
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,16 +17,24 @@ spec:
       labels:
         app: llm
     spec:
+      # 允许调度到带 nvidia.com/gpu 污点的节点（常见于云厂商 GPU 节点）
+      # tolerations:
+      #   - key: nvidia.com/gpu
+      #     operator: Exists
+      #     effect: NoSchedule
       containers:
         - name: llm
-          # 示例：ghcr.io/ggerganov/llama.cpp 或自建镜像（见 deploy/LLM_DOCKERFILE.md）
-          image: ghcr.io/ggerganov/llama.cpp:latest
+          # 从 Docker Hub 拉取：damonleelcx/twixter.store-llm（需先构建并 push，见 backend/deploy/README.md）
+          image: damonleelcx/twixter.store-llm:latest
+          imagePullPolicy: IfNotPresent
+          # 与 ghcr.io/ggml-org/llama.cpp:server 镜像一致，仅传参数；有 GPU 时可用 -ngl 等（需镜像支持）
           args:
-            - "./server"
             - "-m"
             - "/models/model.gguf"
             - "--port"
             - "8081"
+            - "--host"
+            - "0.0.0.0"
           ports:
             - containerPort: 8081
               name: http
@@ -33,9 +42,11 @@ spec:
             limits:
               cpu: "8"
               memory: "32Gi"
+              # nvidia.com/gpu: "1"
             requests:
               cpu: "4"
               memory: "16Gi"
+              # nvidia.com/gpu: "1"
           # 若模型通过 PVC 挂载，取消注释并创建对应 PVC
           # volumeMounts:
           #   - name: model

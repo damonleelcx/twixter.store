@@ -1,0 +1,17 @@
+# 自托管 LLM 推理镜像（llama.cpp server）
+# 将模型文件放到 backend/deploy/models/model.gguf，构建后运行在 8081 端口
+#
+# 构建（在仓库根目录，上下文为 backend/deploy）:
+#   docker build -f backend/deploy/Dockerfile.llm -t twixter-llm:latest backend/deploy
+# Minikube 使用本地镜像:
+#   eval $(minikube docker-env) && docker build -f backend/deploy/Dockerfile.llm -t twixter-llm:latest backend/deploy
+#   # 或构建后在主机: minikube image load twixter-llm:latest
+
+# 官方镜像已迁至 ggml-org，见 https://github.com/ggml-org/llama.cpp/tree/master/docs
+FROM ghcr.io/ggml-org/llama.cpp:server
+
+COPY ./models /models
+EXPOSE 8081
+
+# server 镜像 ENTRYPOINT 已是 llama-server，仅传参数；--host 0.0.0.0 便于 k8s 访问
+CMD ["-m", "/models/model.gguf", "--port", "8081", "--host", "0.0.0.0"]

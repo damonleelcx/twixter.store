@@ -3,6 +3,7 @@ package middleware
 import (
 	"backend/entity"
 	"backend/service"
+	"log"
 	"net/http"
 	"strings"
 
@@ -15,30 +16,23 @@ const AuthTokenCookieName = "twixter_token"
 // AuthMiddleware Authentication middleware
 func AuthMiddleware(authService service.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get token from Authorization header
+		// Get token from Authorization header, or from cookie (e.g. when proxy strips header or GET from same origin)
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		token := ""
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" && parts[1] != "" {
+				token = parts[1]
+			}
+		}
+		if token == "" {
+			token, _ = c.Cookie(AuthTokenCookieName)
+		}
+		if token == "" {
+			log.Printf("[Auth] 401 %s %s: Authorization header missing", c.Request.Method, c.Request.URL.Path)
+			c.Header("X-Auth-Reason", "no-header")
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Authorization header required",
-			})
-			c.Abort()
-			return
-		}
-
-		// Check if it's a Bearer token
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Invalid authorization header format. Expected: Bearer <token>",
-			})
-			c.Abort()
-			return
-		}
-
-		token := parts[1]
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Token is required",
 			})
 			c.Abort()
 			return
@@ -47,8 +41,15 @@ func AuthMiddleware(authService service.AuthService) gin.HandlerFunc {
 		// Validate token
 		session, user, err := authService.ValidateToken(token)
 		if err != nil {
+			log.Printf("[Auth] 401 %s %s: token validation failed: %v", c.Request.Method, c.Request.URL.Path, err)
+			reason := "token-invalid"
+			if err.Error() == "session expired or revoked" {
+				reason = "session-expired"
+			}
+			c.Header("X-Auth-Reason", reason)
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid or expired token",
+				"reason": reason,
 			})
 			c.Abort()
 			return

@@ -19,7 +19,7 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    # 本地访问：将 api.twixter.local 解析到 minikube IP（或加 hosts 条目）
+    # 生产：host 用 api.twixter.store。本地 Minikube：要么在 hosts 里写 <MINIKUBE_IP> api.twixter.store，要么改为 api.twixter.local 并与 README 的 hosts 一致
     - host: api.twixter.store
       http:
         paths:

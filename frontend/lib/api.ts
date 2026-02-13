@@ -134,14 +134,25 @@ async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Prom
       }
       const pendingRefresh = refreshPromise;
       const newAccessToken = await pendingRefresh;
-      res = await fetch(input, {
-        ...init,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${newAccessToken}`,
-          ...init?.headers,
-        },
-      });
+      if (!newAccessToken || typeof newAccessToken !== "string") {
+        refreshPromise = null;
+        return res;
+      }
+      // Brief delay so the backend that served refresh has committed the new session (avoids 401 on retry when load-balanced across replicas)
+      await new Promise((r) => setTimeout(r, 300));
+      const retryHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${newAccessToken}`,
+        ...(init?.headers as Record<string, string>),
+      };
+      res = await fetch(input, { ...init, headers: retryHeaders });
+      // If retry still 401, try once more with token from localStorage (in case retry used stale closure)
+      if (res.status === 401) {
+        const storedToken = getAccessToken();
+        if (storedToken && storedToken === newAccessToken) {
+          res = await fetch(input, { ...init, headers: { ...retryHeaders, Authorization: `Bearer ${storedToken}` } });
+        }
+      }
     } catch {
       refreshPromise = null;
       throw new Error("Session expired. Please sign in again.");

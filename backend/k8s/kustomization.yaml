@@ -9,8 +9,10 @@ resources:
   - zookeeper-service.yaml
   - kafka-deployment.yaml
   - kafka-service.yaml
+  - kafka-pdb.yaml
   - redis-deployment.yaml
   - redis-service.yaml
+  - redis-pdb.yaml
   - mongodb-statefulset.yaml
   - mongodb-service.yaml
   - llm-deployment.yaml

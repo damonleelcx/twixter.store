@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"backend/entity"
+	"backend/middleware"
 	"backend/service"
 
 	"github.com/gin-gonic/gin"
@@ -24,12 +25,12 @@ func NewChatController(chatService *service.ChatService) *ChatController {
 // GetSession 获取当前会话状态；若需先填写人格则返回 need_onboarding
 // GET /api/chat/session?session_id=xxx
 func (c *ChatController) GetSession(ctx *gin.Context) {
-	userID, ok := ctx.Get("user_id")
+	user, ok := middleware.GetUserFromContext(ctx)
 	if !ok {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid := user.ID
 	sessionID := ctx.Query("session_id")
 
 	need, err := c.chatService.NeedOnboarding(uid)
@@ -73,12 +74,12 @@ type OnboardingRequest struct {
 // Onboarding 提交名字与人格，写入 Postgres
 // POST /api/chat/onboarding
 func (c *ChatController) Onboarding(ctx *gin.Context) {
-	userID, ok := ctx.Get("user_id")
+	user, ok := middleware.GetUserFromContext(ctx)
 	if !ok {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid := user.ID
 
 	var req OnboardingRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -101,12 +102,12 @@ type StreamRequest struct {
 // Stream 流式回复（SSE）；若未填写人格则 428 Need Persona
 // POST /api/chat/stream
 func (c *ChatController) Stream(ctx *gin.Context) {
-	userID, ok := ctx.Get("user_id")
+	user, ok := middleware.GetUserFromContext(ctx)
 	if !ok {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	uid := userID.(uint)
+	uid := user.ID
 
 	var req StreamRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {

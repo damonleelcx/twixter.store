@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"backend/entity"
+
 	"gorm.io/gorm"
 )
 
@@ -140,6 +141,6 @@ func InitPermissions(db *gorm.DB) {
 		}
 	}
 
-	grantCanUseBotToDarkAndAdmin(db)
+	// grantCanUseBotToDarkAndAdmin(db)
 	log.Println("Permissions initialization completed")
 }

@@ -1,0 +1,13 @@
+# PodDisruptionBudget：自愿驱逐（如 drain、eviction API）时至少保留 1 个 Kafka，避免被驱逐
+# SIGTERM 来自 Kubernetes：有人/调度器删除 Pod、节点 drain、滚动更新等。PDB 可阻止“自愿驱逐”，
+# 但无法阻止手动 kubectl delete pod；生产建议用托管 Kafka。
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka-pdb
+  namespace: default
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: kafka
