@@ -209,11 +209,11 @@ docker-compose up -d zookeeper kafka
 # 后端连接时使用 KAFKA_BROKERS=localhost:9092
 ```
 
-**若必须在本机 Windows 跑 Kafka，恢复步骤：**
-1. 停止 Kafka 进程（以及所有消费该集群的进程）。
-2. 删除出问题的日志目录（例如 `C:\tmp\kafka-logs`，或仅删除 `C:\tmp\kafka-logs\analytics-topic-3`）。
-3. 确认没有其他程序（杀毒、索引等）占用该目录后，重新启动 Kafka。
-4. 如需减少此类问题，可适当增大 `log.retention.hours` 或 `log.retention.ms`，减少清理频率（仍可能再次发生）。
+**若必须在本机 Windows 跑 Kafka**：完整配置与恢复步骤见项目根目录 [docs/KAFKA-WINDOWS.md](../../docs/KAFKA-WINDOWS.md)，包括：
+- 推荐 `log.dirs` 使用专用目录（如 `D:\kafka-logs`）并在杀毒中排除；
+- 适当增大 `log.retention.hours`（如 168）减少清理频率；
+- 正确关闭顺序（先停 Kafka 再停 Zookeeper，勿强制杀进程）；
+- 出问题后删除对应 topic 子目录再启动，或改用 Docker。
 
 ### S3上传失败
 - 检查AWS凭证是否正确

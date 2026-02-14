@@ -1,0 +1,10 @@
+# 自托管 LLM 推理镜像示例（llama.cpp server）
+# 将模型文件放到 ./models/model.gguf，构建后运行在 8081 端口
+# 使用：docker build -f backend/deploy/LLM_DOCKERFILE.example -t yourrepo/llm:latest .
+
+FROM ghcr.io/ggml-org/llama.cpp:server
+
+COPY ./models /models
+EXPOSE 8081
+
+CMD ["-m", "/models/model.gguf", "--port", "8081", "--host", "0.0.0.0"]

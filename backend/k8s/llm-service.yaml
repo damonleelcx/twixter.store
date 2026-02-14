@@ -1,0 +1,17 @@
+# 仅当在集群内部署 LLM（llm-deployment）时需要；使用外部 LLM API（如 vast.ai）时无需本 Service，见 backend/deploy/README.md。
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm
+  namespace: default
+  labels:
+    app: llm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8081
+      targetPort: 8081
+      protocol: TCP
+      name: http
+  selector:
+    app: llm

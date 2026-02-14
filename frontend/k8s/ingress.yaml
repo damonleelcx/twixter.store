@@ -1,5 +1,5 @@
 # Ingress 暴露前端，与 backend 共用 nginx ingress
-# 本地：将 www.twixter.local 解析到 minikube IP
+# 生产：host 用 www.twixter.store。本地 Minikube：要么在 hosts 里写 <MINIKUBE_IP> www.twixter.store，要么改为 www.twixter.local 并与 README 的 hosts 一致
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

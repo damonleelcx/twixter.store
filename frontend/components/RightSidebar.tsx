@@ -34,6 +34,14 @@ export function RightSidebar({ initialTrendingTags }: RightSidebarProps) {
     };
   }, []);
 
+  useEffect(() => {
+    const onWalletUpdated = () => {
+      fetchCurrentUser().then((u) => setUser(u ?? null));
+    };
+    window.addEventListener("wallet-updated", onWalletUpdated);
+    return () => window.removeEventListener("wallet-updated", onWalletUpdated);
+  }, []);
+
   // When server didn't provide tags (null) or returned empty (e.g. server-side fetch failed in K8s), fetch on client
   const shouldFetchTags =
     initialTrendingTags == null || (Array.isArray(initialTrendingTags) && initialTrendingTags.length === 0);

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 
@@ -57,6 +58,20 @@ func main() {
 	// 若不存在任何 admin 则根据环境变量 ADMIN_EMAIL、ADMIN_PASSWORD 创建种子 admin
 	if err := services.AuthService.EnsureAdminSeed(os.Getenv("ADMIN_EMAIL"), os.Getenv("ADMIN_PASSWORD")); err != nil {
 		log.Printf("Warning: EnsureAdminSeed failed: %v", err)
+	}
+
+	// 初始化 MongoDB（聊天消息历史）与聊天服务
+	mongoClient, mongoErr := config.InitMongo()
+	if mongoErr != nil {
+		log.Printf("Warning: MongoDB not available: %v. Chat history will not be persisted.", mongoErr)
+	}
+	services.ChatService = config.InitChatService(repos, mongoClient)
+	if mongoClient != nil {
+		defer func() {
+			if err := mongoClient.Disconnect(context.Background()); err != nil {
+				log.Printf("Mongo disconnect: %v", err)
+			}
+		}()
 	}
 
 	// 初始化 controllers

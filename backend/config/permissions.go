@@ -5,8 +5,49 @@ import (
 	"log"
 
 	"backend/entity"
+
 	"gorm.io/gorm"
 )
+
+// grantCanUseBotToDarkAndAdmin 为所有已存在的 dark / admin 用户授予 can_use_bot（仅 dark 与 admin 可拥有）
+func grantCanUseBotToDarkAndAdmin(db *gorm.DB) {
+	var perm entity.Permission
+	if err := db.Where("name = ?", "can_use_bot").First(&perm).Error; err != nil || perm.ID == 0 {
+		return
+	}
+	accountTypes := []string{string(entity.AccountTypeDark), string(entity.AccountTypeAdmin)}
+	var ids0 []uint
+	if err := db.Model(&entity.UserShard0{}).Where("account_type IN ?", accountTypes).Pluck("id", &ids0).Error; err != nil {
+		log.Printf("grantCanUseBotToDarkAndAdmin shard0: %v", err)
+		return
+	}
+	var ids1 []uint
+	if err := db.Model(&entity.UserShard1{}).Where("account_type IN ?", accountTypes).Pluck("id", &ids1).Error; err != nil {
+		log.Printf("grantCanUseBotToDarkAndAdmin shard1: %v", err)
+		return
+	}
+	for _, userID := range ids0 {
+		var ex entity.UserPermission
+		if err := db.Where("user_id = ? AND permission_id = ?", userID, perm.ID).First(&ex).Error; err == nil || !errors.Is(err, gorm.ErrRecordNotFound) {
+			continue
+		}
+		up := &entity.UserPermission{UserID: userID, PermissionID: perm.ID, ShardNumber: 0}
+		if err := db.Create(up).Error; err != nil {
+			log.Printf("grant can_use_bot to user %d: %v", userID, err)
+		}
+	}
+	for _, userID := range ids1 {
+		var ex entity.UserPermission
+		if err := db.Where("user_id = ? AND permission_id = ?", userID, perm.ID).First(&ex).Error; err == nil || !errors.Is(err, gorm.ErrRecordNotFound) {
+			continue
+		}
+		up := &entity.UserPermission{UserID: userID, PermissionID: perm.ID, ShardNumber: 1}
+		if err := db.Create(up).Error; err != nil {
+			log.Printf("grant can_use_bot to user %d: %v", userID, err)
+		}
+	}
+	log.Println("Granted can_use_bot to existing dark/admin users")
+}
 
 // InitPermissions 初始化系统权限
 func InitPermissions(db *gorm.DB) {
@@ -60,6 +101,13 @@ func InitPermissions(db *gorm.DB) {
 			Action:      entity.ActionView,
 			IsSystem:    true,
 		},
+		{
+			Name:        "can_use_bot",
+			Description: "允许使用 Agent 聊天（仅 dark / admin 账户类型）",
+			Resource:    "bot",
+			Action:      entity.ActionView,
+			IsSystem:    true,
+		},
 	}
 
 	for _, perm := range permissions {
@@ -93,5 +141,6 @@ func InitPermissions(db *gorm.DB) {
 		}
 	}
 
+	// grantCanUseBotToDarkAndAdmin(db)
 	log.Println("Permissions initialization completed")
 }

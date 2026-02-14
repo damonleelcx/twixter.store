@@ -16,3 +16,11 @@ data:
   HTTP_PROXY: "http://10.42.0.1:8888"
   # Postgres 与 K8s 同机且 status.hostIP 为公网 IP 时，用节点在 Pod 网段的 IP 避免本机回环；k3s 单节点多为 10.42.0.1。若 DB 在远程，删掉此行改由 Secret 提供 DB_HOST。
   DB_HOST: "10.42.0.1"
+  # SMTP 从集群内连外网被拒时，若节点本机有 SMTP 服务或 relay，可设为节点 Pod 网段 IP，与 DB_HOST 同理。否则删掉此行，由 Secret 提供 SMTP_HOST。
+  SMTP_HOST: "10.42.0.1"
+  SMTP_PORT: "465"
+  SMTP_USE_TLS: "1"
+  # 聊天：MongoDB 消息历史（集群内 Service 名）
+  # MONGO_URI: "mongodb://mongodb:27017"
+  # 自托管 LLM（llama.cpp server）；不设则聊天流式返回占位文案
+  # LLM_ENDPOINT: "http://llm:8081"

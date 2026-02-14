@@ -29,6 +29,7 @@ func RunMigrations(db *gorm.DB) error {
 		&entity.ContentBookmark{},
 		&entity.Wallet{},
 		&entity.Analytics{},
+		&entity.ChatPersona{},
 	); err != nil {
 		return err
 	}
@@ -38,7 +39,7 @@ func RunMigrations(db *gorm.DB) error {
 		return err
 	}
 
-	log.Println("Database migration completed successfully (users, users_shard_0, users_shard_1, sessions, permissions, user_permissions, contents, tags, content_tags, purchases_shard_0, purchases_shard_1, purchases_shard_2, purchases_shard_3, wallets, analytics)")
+	log.Println("Database migration completed successfully (users, users_shard_0, users_shard_1, sessions, permissions, user_permissions, contents, tags, content_tags, purchases_shard_0, purchases_shard_1, purchases_shard_2, purchases_shard_3, wallets, analytics, chat_personas)")
 	return nil
 }
 
@@ -257,6 +258,11 @@ func createIndexes(db *gorm.DB) error {
 			sql: `CREATE INDEX IF NOT EXISTS idx_analytics_views 
 				ON analytics(views DESC, date DESC) 
 				WHERE deleted_at IS NULL;`,
+		},
+		// 聊天人格：按 user_id 查询
+		{
+			name: "idx_chat_personas_user_id",
+			sql:  `CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_personas_user_id ON chat_personas(user_id) WHERE deleted_at IS NULL;`,
 		},
 	}
 

@@ -9,8 +9,15 @@ resources:
   - zookeeper-service.yaml
   - kafka-deployment.yaml
   - kafka-service.yaml
+  - kafka-pdb.yaml
   - redis-deployment.yaml
   - redis-service.yaml
+  - redis-pdb.yaml
+  - mongodb-statefulset.yaml
+  - mongodb-service.yaml
+  # 使用外部 LLM（如 vast.ai / OpenRouter）时不部署集群内 LLM；需要时取消注释
+  # - llm-deployment.yaml
+  # - llm-service.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml

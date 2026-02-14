@@ -2,14 +2,17 @@ package config
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"backend/controller"
 	"backend/middleware"
 	"backend/repository"
 	"backend/service"
+	"backend/store"
 
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/mongo"
 	"gorm.io/gorm"
 )
 
@@ -20,6 +23,7 @@ type Services struct {
 	PurchaseService service.PurchaseService
 	StripeService   service.StripeService
 	PayPalService   service.PayPalService
+	ChatService     *service.ChatService // 聊天（人格 Postgres + 消息 MongoDB + LLM 流式）；可选
 }
 
 // Controllers 包含所有初始化的控制器
@@ -28,6 +32,7 @@ type Controllers struct {
 	ContentController   *controller.ContentController
 	PurchaseController  *controller.PurchaseController
 	AnalyticsController *controller.AnalyticsController
+	ChatController      *controller.ChatController
 }
 
 // Repositories 包含所有初始化的仓库
@@ -43,6 +48,7 @@ type Repositories struct {
 	ContentTagRepo      repository.ContentTagRepository
 	ContentBookmarkRepo repository.ContentBookmarkRepository
 	AnalyticsRepo       repository.AnalyticsRepository
+	ChatPersonaRepo     repository.ChatPersonaRepository
 }
 
 // InitRepositories 初始化所有仓库
@@ -59,6 +65,7 @@ func InitRepositories(db *gorm.DB) *Repositories {
 		ContentTagRepo:      repository.NewContentTagRepository(db),
 		ContentBookmarkRepo: repository.NewContentBookmarkRepository(db),
 		AnalyticsRepo:       repository.NewAnalyticsRepository(db),
+		ChatPersonaRepo:     repository.NewChatPersonaRepository(db),
 	}
 }
 
@@ -182,6 +189,29 @@ func InitServices(db *gorm.DB, repos *Repositories) (*Services, error) {
 	return services, nil
 }
 
+// InitChatService 初始化聊天服务（MongoDB 消息历史 + LLM 流式 + 每条消息 1 积分）；mongoClient 为 nil 时仅用 Postgres 人格
+func InitChatService(repos *Repositories, mongoClient *mongo.Client) *service.ChatService {
+	var mongoChat *store.MongoChatStore
+	if mongoClient != nil {
+		var err error
+		mongoChat, err = store.NewMongoChatStore(mongoClient)
+		if err != nil {
+			log.Printf("Warning: MongoChatStore init failed: %v. Chat message history will not be persisted.", err)
+		}
+	}
+	// 优先 OpenRouter，其次 NinjaChat，最后自托管 LLM_ENDPOINT
+	var llmStreamer service.LLMStreamer
+	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
+		llmStreamer = service.NewOpenRouterClient()
+	} else if apiKey := os.Getenv("NINJACHAT_API_KEY"); apiKey != "" {
+		llmStreamer = service.NewNinjaChatClient()
+	} else {
+		llmEndpoint := os.Getenv("LLM_ENDPOINT")
+		llmStreamer = service.NewLLMClient(llmEndpoint)
+	}
+	return service.NewChatService(repos.ChatPersonaRepo, repos.WalletRepo, mongoChat, llmStreamer)
+}
+
 // InitControllers 初始化所有控制器
 func InitControllers(services *Services, repos *Repositories) *Controllers {
 	controllers := &Controllers{}
@@ -208,6 +238,11 @@ func InitControllers(services *Services, repos *Repositories) *Controllers {
 		repos.ContentRepo,
 		repos.PurchaseRepo,
 	)
+
+	// 聊天控制器（当 ChatService 已设置时，由 main 在 InitChat 后设置）
+	if services.ChatService != nil {
+		controllers.ChatController = controller.NewChatController(services.ChatService)
+	}
 
 	return controllers
 }

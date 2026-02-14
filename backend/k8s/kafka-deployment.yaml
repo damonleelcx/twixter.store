@@ -1,4 +1,7 @@
 # Kafka 单实例，依赖 Zookeeper；与 docker-compose 一致，供后端视频处理
+# 若出现 InconsistentClusterIdException（ZK 重建或 clusterId 不一致），删 Pod 让 Deployment 起新 Pod 即可清空 emptyDir 中的 meta.properties
+# 不希望 Kafka 被关掉：SIGTERM 由 K8s 在删除/驱逐 Pod 时发送。已配 kafka-pdb（minAvailable:1）以阻止自愿驱逐；
+# 请勿对该 Pod 执行 kubectl delete pod / drain 节点；生产建议用托管 Kafka。
 apiVersion: apps/v1
 kind: Deployment
 metadata:

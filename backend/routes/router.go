@@ -127,6 +127,10 @@ func SetupRouter(
 		if controllers.AnalyticsController != nil {
 			setupAdminAnalyticsRoutes(api, controllers.AnalyticsController, services.AuthService, repos, cacheMiddleware)
 		}
+
+		if controllers.ChatController != nil {
+			setupChatRoutes(api, controllers.ChatController, services.AuthService, repos)
+		}
 	}
 
 	return router
@@ -169,6 +173,8 @@ func setupAuthRoutes(
 			protectedAuthRoutes.POST("/logout-all", authController.LogoutAll)
 			// 修改密码
 			protectedAuthRoutes.POST("/password/change", authController.ChangePassword)
+			// 领取推荐链接 viewing token（每人仅可领取一次）
+			protectedAuthRoutes.GET("/viewing-token-for-referral", authController.GetViewingTokenForReferral)
 		}
 	}
 }
@@ -302,6 +308,24 @@ func setupAdminAnalyticsRoutes(
 				VaryByQuery: true,
 			}),
 			analyticsController.GetAdminRevenueAnalytics)
+	}
+}
+
+// setupChatRoutes 设置聊天路由（需 can_use_bot 权限；人格存 Postgres，消息存 MongoDB，SSE 流式，每条消息 1 积分）
+func setupChatRoutes(
+	api *gin.RouterGroup,
+	chatController *controller.ChatController,
+	authService service.AuthService,
+	repos *config.Repositories,
+) {
+	chatRoutes := api.Group("/chat")
+	chatRoutes.Use(middleware.RateLimitMiddleware(middleware.DefaultRateLimiter))
+	chatRoutes.Use(middleware.AuthMiddleware(authService))
+	chatRoutes.Use(middleware.RequirePermission(repos.UserPermissionRepo, "can_use_bot"))
+	{
+		chatRoutes.GET("/session", chatController.GetSession)
+		chatRoutes.POST("/onboarding", chatController.Onboarding)
+		chatRoutes.POST("/stream", chatController.Stream)
 	}
 }
 

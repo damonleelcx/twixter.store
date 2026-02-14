@@ -1,0 +1,12 @@
+# PodDisruptionBudget：自愿驱逐（如 drain、缩容）时尽量保留至少 1 个 Redis，避免误删
+# 注意：无法防止节点故障或手动 kubectl delete pod 导致的终止；生产建议用托管 Redis
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: default
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis
