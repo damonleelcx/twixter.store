@@ -7,7 +7,7 @@ import {
   authApiLogout,
   clearTokens,
   fetchCurrentUser,
-  fetchViewingToken,
+  fetchViewingTokenForReferral,
   type CurrentUser,
 } from "@/lib/api";
 import { useTranslations } from "next-intl";
@@ -25,6 +25,7 @@ export default function ProfilePage() {
   const [user, setUser] = useState<CurrentUser | null | undefined>(undefined);
   const [shareableUrl, setShareableUrl] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [shareAlreadyClaimed, setShareAlreadyClaimed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,23 +37,34 @@ export default function ProfilePage() {
     };
   }, []);
 
-  // Build shareable signup link with referral code + encrypted viewing token (same account type as parent)
+  // Build shareable signup link with referral code + encrypted viewing token (same account type as parent). One-time only per user.
   useEffect(() => {
     if (!user?.referral_code) return;
+    if (user.shareable_link_claimed) {
+      setShareAlreadyClaimed(true);
+      return;
+    }
     const mode = user.account_type === "dark" ? "dark" : "light";
     let cancelled = false;
-    fetchViewingToken(mode)
+    fetchViewingTokenForReferral(mode)
       .then((token) => {
         if (cancelled || !token) return;
         const origin = typeof window !== "undefined" ? window.location.origin : "";
         const url = `${origin}/${locale}/auth/signup?ref=${encodeURIComponent(user.referral_code)}&viewing=${encodeURIComponent(token)}`;
         setShareableUrl(url);
       })
-      .catch(() => setShareableUrl(null));
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof Error && err.message === "already_shared") {
+          setShareAlreadyClaimed(true);
+        } else {
+          setShareableUrl(null);
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, [user?.referral_code, user?.account_type, locale]);
+  }, [user?.referral_code, user?.account_type, user?.shareable_link_claimed, locale]);
 
   const copyShareableLink = useCallback(() => {
     if (!shareableUrl) return;
@@ -142,7 +154,9 @@ export default function ProfilePage() {
               <div className="pt-4 border-t border-[var(--border)] mt-4">
                 <p className="text-sm font-medium text-[var(--foreground)]">{t("shareableProfileLink")}</p>
                 <p className="text-sm text-[var(--muted)] mt-1">{t("shareableProfileHint")}</p>
-                {shareableUrl ? (
+                {user.shareable_link_claimed || shareAlreadyClaimed ? (
+                  <p className="mt-2 text-sm text-[var(--muted)]">{t("shareableLinkAlreadyClaimed")}</p>
+                ) : shareableUrl ? (
                   <div className="mt-2 flex gap-2">
                     <input
                       type="text"

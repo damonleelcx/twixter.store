@@ -8,24 +8,30 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 )
 
-// LLMClient 调用自托管 LLM（如 llama.cpp server）的流式接口
+// LLMClient 调用自托管或外部 LLM（如 llama.cpp server、vast.ai 实例）的流式接口。
+// baseURL 可为集群内 http://llm:8081 或外部 GPU 提供商实例 http://<ip>:8081；可选通过 LLM_API_KEY 环境变量设置鉴权头。
 type LLMClient struct {
 	baseURL    string
+	apiKey     string
 	httpClient *http.Client
 }
 
-// NewLLMClient 创建 LLM 客户端；baseURL 如 http://llm:8081
+// NewLLMClient 创建 LLM 客户端。baseURL 如 http://llm:8081 或 http://<vast.ai实例IP>:8081。
+// 若设置环境变量 LLM_API_KEY，请求时会带 Authorization: Bearer <key>（用于需鉴权的外部代理）。
 func NewLLMClient(baseURL string) *LLMClient {
 	if baseURL == "" {
 		return nil
 	}
+	apiKey := strings.TrimSpace(os.Getenv("LLM_API_KEY"))
 	return &LLMClient{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
+		apiKey:  apiKey,
 		httpClient: &http.Client{
 			Timeout: 0, // 流式响应不设总超时
 			Transport: &http.Transport{
@@ -60,6 +66,24 @@ func removeLinks(s string) string {
 // 截断推广句：从 "(If you want to chat with" 起的内容一律不输出
 var rePromoPhrase = regexp.MustCompile(`(?i)\(If you want to chat with`)
 
+// 移除回复中的角色标签，避免出现 "Assistant:", "user:" 等
+var (
+	reLeadingRoleLabel  = regexp.MustCompile(`(?i)^\s*(Assistant|User)\s*:\s*`)
+	reLineRoleLabel     = regexp.MustCompile(`(?m)\n\s*(Assistant|User)\s*:\s*[^\n]*`)
+	// 移除开头的 "Oh, [name], " / "Oh, [name]. " / "Oh, [name] " 等
+	reOhNamePrefix = regexp.MustCompile(`(?i)^\s*Oh,\s*[^,.!\n]+[,\.!]?\s*`)
+	// 移除开头的 "[Name], [Name], [Name]. " 重复名字（Go regexp 无 \1，用三组「词, 」匹配）
+	reRepeatedNamePrefix = regexp.MustCompile(`(?i)^\s*\w+,\s*\w+,\s*\w+[,\.!]\s*`)
+)
+
+func stripRoleLabels(s string) string {
+	s = reLeadingRoleLabel.ReplaceAllString(s, "")
+	s = reLineRoleLabel.ReplaceAllString(s, "")
+	s = reOhNamePrefix.ReplaceAllString(s, "")
+	s = reRepeatedNamePrefix.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
+}
+
 func stripPromoPhrase(s string) string {
 	if idx := rePromoPhrase.FindStringIndex(s); idx != nil {
 		return strings.TrimRight(s[:idx[0]], " (\n")
@@ -85,6 +109,9 @@ func (c *LLMClient) StreamCompletion(ctx context.Context, prompt string, onChunk
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -245,5 +272,5 @@ func (c *LLMClient) StreamCompletion(ctx context.Context, prompt string, onChunk
 	if emitBuf != "" && onChunk != nil {
 		onChunk(emitBuf)
 	}
-	return fullBuilder.String(), scanner.Err()
+	return stripRoleLabels(fullBuilder.String()), scanner.Err()
 }

@@ -34,6 +34,8 @@ cd path\to\kafka
 kafka-server-start.bat config\server.properties
 ```
 
+**Windows 单机跑 Kafka**：若遇到 “file is being used by another process” 或 log dir 失败，请按 [docs/KAFKA-WINDOWS.md](docs/KAFKA-WINDOWS.md) 配置 `log.dirs`、保留时间及启动/关闭顺序；或改用 Docker：`cd backend && docker-compose up -d zookeeper kafka`。
+
 ### 3. Run the backend
 
 From the project root:

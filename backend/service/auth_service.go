@@ -3,6 +3,7 @@ package service
 import (
 	"backend/entity"
 	"backend/repository"
+	"backend/viewingtoken"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -46,6 +47,8 @@ type AuthService interface {
 	GetMembershipStatus(userID uint) (status string, expiresAt *time.Time)
 	// EnsureAdminSeed 若不存在任何 admin 账户则根据环境变量创建种子 admin（ADMIN_EMAIL、ADMIN_PASSWORD）
 	EnsureAdminSeed(adminEmail, adminPassword string) error
+	// ClaimViewingTokenForReferral 为推荐链接领取 viewing token，每人仅可领取一次；alreadyClaimed 为 true 表示已领取过
+	ClaimViewingTokenForReferral(userID uint, mode string) (token string, alreadyClaimed bool, err error)
 }
 
 // authService Authentication service implementation
@@ -853,4 +856,29 @@ func (s *authService) EnsureAdminSeed(adminEmail, adminPassword string) error {
 	}
 	log.Printf("Seeded admin account: %s", adminEmail)
 	return nil
+}
+
+// ClaimViewingTokenForReferral 为推荐链接领取 viewing token，每人仅可领取一次
+func (s *authService) ClaimViewingTokenForReferral(userID uint, mode string) (token string, alreadyClaimed bool, err error) {
+	user, err := s.userRepo.GetByIDFromShard(userID, userID)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to query user: %w", err)
+	}
+	if user.ShareableLinkClaimedAt != nil {
+		return "", true, nil
+	}
+	plain := "viewing_light"
+	if mode == "dark" {
+		plain = "viewing_dark"
+	}
+	token = viewingtoken.EncryptViewingToken(plain)
+	if token == "" {
+		return "", false, errors.New("viewing token not available")
+	}
+	now := time.Now()
+	user.ShareableLinkClaimedAt = &now
+	if err := s.userRepo.UpdateInShard(userID, user); err != nil {
+		return "", false, fmt.Errorf("failed to mark shareable link claimed: %w", err)
+	}
+	return token, false, nil
 }

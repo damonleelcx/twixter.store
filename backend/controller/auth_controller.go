@@ -446,5 +446,30 @@ func (ac *AuthController) GetCurrentUser(c *gin.Context) {
 	} else {
 		userPayload["membership_expires_at"] = nil
 	}
+	userPayload["shareable_link_claimed"] = userBase.ShareableLinkClaimedAt != nil
 	c.JSON(http.StatusOK, gin.H{"user": userPayload})
+}
+
+// GetViewingTokenForReferral 为推荐链接领取 viewing token（每人仅可领取一次，需登录）
+func (ac *AuthController) GetViewingTokenForReferral(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userBase := user.(*entity.UserBase)
+	mode := c.DefaultQuery("mode", string(userBase.AccountType))
+	if mode != "dark" {
+		mode = "light"
+	}
+	token, alreadyClaimed, err := ac.authService.ClaimViewingTokenForReferral(userBase.ID, mode)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	if alreadyClaimed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "already_shared", "message": "You can only share your link once"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token})
 }

@@ -58,8 +58,9 @@ func (c *ChatController) GetSession(ctx *gin.Context) {
 		"need_onboarding": false,
 		"session_id":      sid,
 		"persona":         persona,
+		"messages":        []interface{}{},
 	}
-	if sess != nil {
+	if sess != nil && len(sess.Messages) > 0 {
 		resp["messages"] = sess.Messages
 	}
 	ctx.JSON(http.StatusOK, resp)
@@ -124,17 +125,21 @@ func (c *ChatController) Stream(ctx *gin.Context) {
 		return
 	}
 
-	// 1 credit per message: deduct before starting SSE so we can return 402
+	// 6.99 credits per message: deduct before starting SSE so we can return 402
 	if err := c.chatService.EnsureAndSpendCreditForMessage(uid); err != nil {
 		if errors.Is(err, service.ErrInsufficientCredits) {
 			ctx.JSON(http.StatusPaymentRequired, gin.H{
 				"code":    "INSUFFICIENT_CREDITS",
-				"message": "1 credit per message. Please add credits to continue.",
+				"message": "6.99 credits per message. Please add credits to continue.",
 			})
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// Invalidate /auth/me cache so next fetch returns fresh wallet_balance
+	if middleware.GlobalCacheMiddleware != nil {
+		_ = middleware.GlobalCacheMiddleware.InvalidateUserCache(uid)
 	}
 
 	ctx.Header("Content-Type", "text/event-stream")

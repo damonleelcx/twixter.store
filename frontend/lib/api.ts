@@ -174,6 +174,8 @@ export type CurrentUser = {
   wallet_balance?: number;
   membership_status?: "active" | "none";
   membership_expires_at?: string | null;
+  /** 是否已领取过推荐分享链接（每人仅可领取一次） */
+  shareable_link_claimed?: boolean;
 };
 
 /** Single in-flight promise so many components (e.g. 20 ContentCards + sidebars) trigger only one /auth/me request. Cleared when settled. */
@@ -208,6 +210,18 @@ export async function fetchViewingToken(mode: "light" | "dark"): Promise<string>
   const res = await fetch(`${base}/content/viewing-token?mode=${mode}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || "Failed to get viewing token");
+  return typeof data?.token === "string" ? data.token : "";
+}
+
+/** 领取推荐链接的 viewing token（每人仅可领取一次，需登录）。若已领取过则抛出 Error，message 为 "already_shared"。 */
+export async function fetchViewingTokenForReferral(mode: "light" | "dark"): Promise<string> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/auth/viewing-token-for-referral?mode=${mode}`);
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 403 && (data?.error === "already_shared" || data?.message)) {
+    throw new Error("already_shared");
+  }
+  if (!res.ok) throw new Error((data?.error as string) || "Failed to get viewing token");
   return typeof data?.token === "string" ? data.token : "";
 }
 
@@ -382,7 +396,7 @@ export async function capturePayPalOrder(orderID: string): Promise<{ status: str
   return data;
 }
 
-// --- Agent Chat (requires can_use_bot; 1 credit per message) ---
+// --- Agent Chat (requires can_use_bot; 6.99 credits per message) ---
 
 export type ChatPersonality = {
   tone: string;
@@ -422,7 +436,7 @@ export async function postChatOnboarding(name: string, personality: ChatPersonal
   if (!res.ok) throw new Error((data?.error as string) || "Failed to save");
 }
 
-/** Send a message and stream assistant reply via SSE. Consumes 1 credit. */
+/** Send a message and stream assistant reply via SSE. Consumes 6.99 credits. */
 export async function postChatStream(
   sessionId: string,
   message: string,
@@ -436,7 +450,7 @@ export async function postChatStream(
   });
   if (res.status === 402) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data?.message || "1 credit per message. Please add credits.");
+    throw new Error(data?.message || "6.99 credits per message. Please add credits.");
   }
   if (res.status === 428) {
     const data = await res.json().catch(() => ({}));

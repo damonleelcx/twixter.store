@@ -101,6 +101,9 @@ export function ChatContent() {
         setStreamingContent(full);
       });
       setMessages((prev) => [...prev, { role: "assistant", content: full }]);
+      const u = await fetchCurrentUser();
+      if (u?.wallet_balance != null) setWalletBalance(u.wallet_balance);
+      window.dispatchEvent(new CustomEvent("wallet-updated"));
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
     } finally {
@@ -155,7 +158,7 @@ export function ChatContent() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium">{t("personality")}</label>
+            <label className="mb-1 block text-sm font-medium">{t("personality")} <span className="font-normal text-[var(--muted)]">({t("personalityModifyHint")})</span></label>
             <div className="grid gap-2 text-sm">
               <input
                 type="text"
@@ -233,10 +236,18 @@ export function ChatContent() {
             </div>
           </div>
         ))}
-        {streamingContent && (
+        {streaming && (
           <div className="flex justify-start">
-            <div className="max-w-[85%] rounded-2xl bg-[var(--hover)] px-4 py-2">
-              <p className="whitespace-pre-wrap text-sm">{streamingContent}</p>
+            <div className="max-w-[85%] rounded-2xl bg-[var(--hover)] px-4 py-3">
+              {streamingContent ? (
+                <p className="whitespace-pre-wrap text-sm">{streamingContent}</p>
+              ) : (
+                <div className="flex gap-1" aria-label="Bot is typing">
+                  <span className="h-2 w-2 rounded-full bg-[var(--muted)] animate-bounce [animation-delay:0ms]" />
+                  <span className="h-2 w-2 rounded-full bg-[var(--muted)] animate-bounce [animation-delay:150ms]" />
+                  <span className="h-2 w-2 rounded-full bg-[var(--muted)] animate-bounce [animation-delay:300ms]" />
+                </div>
+              )}
             </div>
           </div>
         )}

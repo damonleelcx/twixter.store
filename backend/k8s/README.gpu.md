@@ -31,9 +31,29 @@ kubectl get nodes -o jsonpath='{.items[*].status.allocatable.nvidia\.com/gpu}'
 
 ## Minikube
 
+### 正常用法（默认带 GPU）
+
+在 **Linux 宿主机**上，只要宿主机已装 NVIDIA 驱动和 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)，用下面任一方式启动即可默认使用 GPU：
+
+- **Docker 运行时**（宿主机用 Docker，推荐）：
+  ```bash
+  minikube start --driver=docker --gpus=all
+  ```
+  需要 Minikube v1.32.0-beta.0 及以上；宿主机需已装 `nvidia-container-toolkit`。
+
+- **裸机 / none 驱动**（Minikube 直接跑在本机，无虚拟机/容器嵌套）：
+  ```bash
+  minikube start --driver=none
+  ```
+  本机需已装 kubelet/kubeadm 或按 Minikube 的 none 驱动文档准备环境。
+
+**Windows 宿主机**：Docker Desktop 跑在 WSL2 里，Minikube 再跑在 Docker 里时，GPU 一般透传不到 Minikube（见下方「Minikube 里 nvidia-smi: command not found」）。若要在本机用 GPU，可尝试在 **WSL2 内部**安装 Linux 版 Docker（不用 Docker Desktop）+ NVIDIA Container Toolkit，在 WSL2 里执行 `minikube start --driver=docker --gpus=all`；或改用 Linux 物理机/虚拟机/远程集群。
+
+### 安装与确认步骤
+
 1. **宿主机**：安装 NVIDIA 驱动与 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)。
 
-2. **用 GPU 驱动启动 Minikube**（二选一）：
+2. **用 GPU 驱动启动 Minikube**（二选一，见上）：
    - **Docker 运行时**（宿主机用 Docker 且已装 nvidia-container-toolkit）：
      ```bash
      minikube start --driver=docker --gpus=all
@@ -69,6 +89,12 @@ kubectl get nodes -o jsonpath='{.items[*].status.allocatable.nvidia\.com/gpu}'
 **结论**：若 `minikube ssh -- nvidia-smi` 报错，当前 Minikube 无法给 LLM 提供 GPU，请按上文去掉 LLM 的 GPU 配置改跑 CPU，避免 LLM Pod 一直 Pending。
 
 ## k3s
+
+### 正常用法（默认带 GPU）
+
+在 **带 GPU 的 Linux 节点**上，安装好 NVIDIA 驱动和 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 后，按 k3s 官方 [GPU / NVIDIA 文档](https://docs.k3s.io/advanced#nvidia-gpu-support) 配置 containerd 使用 `nvidia-container-runtime`，再安装 k3s，节点即可默认暴露 `nvidia.com/gpu`。安装 device plugin 后即可调度 GPU 工作负载。
+
+### 安装与确认步骤
 
 1. **带 GPU 的节点**：安装 NVIDIA 驱动与 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)。
 

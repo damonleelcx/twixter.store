@@ -26,8 +26,9 @@ type UserBase struct {
 	IPAddress   string      `gorm:"size:45" json:"ip_address"` // IPv6 最大长度为 45
 
 	// 推荐相关字段
-	ReferralCode string `gorm:"uniqueIndex;size:20;index" json:"referral_code"` // 用户的推荐码（唯一）
-	ReferredBy   *uint  `gorm:"index" json:"referred_by,omitempty"`             // 推荐人ID（可为空）
+	ReferralCode           string     `gorm:"uniqueIndex;size:20;index" json:"referral_code"`       // 用户的推荐码（唯一）
+	ReferredBy             *uint      `gorm:"index" json:"referred_by,omitempty"`                   // 推荐人ID（可为空）
+	ShareableLinkClaimedAt *time.Time `gorm:"type:timestamp" json:"-"`                              // 分享链接已领取时间（每人仅可领取一次）
 
 	// 时间戳
 	CreatedAt time.Time      `json:"created_at"`

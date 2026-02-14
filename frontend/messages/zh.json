@@ -8,7 +8,7 @@
     "explore": "探索",
     "notifications": "通知",
     "messages": "私信",
-    "chat": "聊天",
+    "chat": "NSFW聊天",
     "library": "我的内容",
     "bookmarks": "书签",
     "profile": "个人",
@@ -25,8 +25,9 @@
     "agentName": "Agent 名称",
     "agentNamePlaceholder": "例如 Luna",
     "personality": "人格",
+    "personalityModifyHint": "可修改",
     "saveAndStart": "保存并开始聊天",
-    "creditPerMessage": "每条消息 1 积分",
+    "creditPerMessage": "每条消息 6.99 积分",
     "balance": "余额",
     "messagePlaceholder": "输入消息...",
     "retry": "重试"
@@ -177,6 +178,7 @@
     "orPayWithPayPal": "或使用其他方式支付",
     "shareableProfileLink": "可分享的个人链接",
     "shareableProfileHint": "分享此链接后，他人注册时会自动带上你的推荐码。推荐他人注册成功即可获得积分。",
+    "shareableLinkAlreadyClaimed": "您只能分享一次链接。",
     "copyLink": "复制链接",
     "copied": "已复制！",
     "agreeToTerms": "注册即表示您同意我们的",
@@ -288,7 +290,7 @@
     "adminRevenueAnalyticsTitle": "收入分析 | Twixter",
     "adminRevenueAnalyticsDescription": "查看内容收入与积分收入。",
     "chatTitle": "聊天 | Twixter",
-    "chatDescription": "Agent 聊天，每条消息 1 积分。"
+    "chatDescription": "Agent 聊天，每条消息 6.99 积分。"
   },
   "admin": {
     "analytics": {

@@ -21,6 +21,6 @@ data:
   SMTP_PORT: "465"
   SMTP_USE_TLS: "1"
   # 聊天：MongoDB 消息历史（集群内 Service 名）
-  MONGO_URI: "mongodb://mongodb:27017"
+  # MONGO_URI: "mongodb://mongodb:27017"
   # 自托管 LLM（llama.cpp server）；不设则聊天流式返回占位文案
-  LLM_ENDPOINT: "http://llm:8081"
+  # LLM_ENDPOINT: "http://llm:8081"

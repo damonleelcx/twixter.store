@@ -173,6 +173,8 @@ func setupAuthRoutes(
 			protectedAuthRoutes.POST("/logout-all", authController.LogoutAll)
 			// 修改密码
 			protectedAuthRoutes.POST("/password/change", authController.ChangePassword)
+			// 领取推荐链接 viewing token（每人仅可领取一次）
+			protectedAuthRoutes.GET("/viewing-token-for-referral", authController.GetViewingTokenForReferral)
 		}
 	}
 }

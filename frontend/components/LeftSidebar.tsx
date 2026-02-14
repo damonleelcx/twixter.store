@@ -2,8 +2,10 @@
 
 import { ThemeSwitcher } from "@/app/[locale]/ThemeSwitcher";
 import { fetchCurrentUser } from "@/lib/api";
+import { getViewingCookie } from "@/lib/viewing";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -17,6 +19,7 @@ type LeftSidebarProps = {
 export function LeftSidebar({ locale }: LeftSidebarProps) {
   const t = useTranslations("nav");
   const tAuth = useTranslations("auth");
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<Awaited<ReturnType<typeof fetchCurrentUser>> | undefined>(undefined);
 
   useEffect(() => {
@@ -33,11 +36,14 @@ export function LeftSidebar({ locale }: LeftSidebarProps) {
   const canViewAnalytics = Boolean(user?.permissions?.includes("can_view_analytics"));
   const canUseBot = Boolean(user?.permissions?.includes("can_use_bot"));
   const isLoggedIn = user != null;
+  const hasViewingParamOrCookie =
+    (searchParams?.get("viewing")?.trim()?.length ?? 0) > 0 || getViewingCookie() != null;
+  const showChatNav = canUseBot || (!isLoggedIn && hasViewingParamOrCookie);
 
   const items = navItems.filter((item) => {
     if (item.key === "adminUpload") return canUpload;
     if (item.key === "adminAnalytics") return canViewAnalytics;
-    if (item.key === "chat") return canUseBot;
+    if (item.key === "chat") return showChatNav;
     return true;
   });
 

@@ -2,9 +2,52 @@
 
 自托管 LLM 与部署相关资源。
 
-## LLM 镜像（llama.cpp server）
+## 方案一：使用 GPU 提供商 API（如 vast.ai）— 推荐
 
-`Dockerfile.llm` 基于 `ghcr.io/ggml-org/llama.cpp:server`，将模型目录 `./models` 拷贝进镜像，在容器内监听 8081 端口。`backend/k8s/llm-deployment.yaml` 已配置从 **Docker Hub** 拉取 `damonleelcx/twixter.store-llm:latest`（需先构建并 push，见下方步骤 2–3）。
+不自行部署 LLM 到 k8s，改为使用 **vast.ai**（或 RunPod、Lambda 等）上的 GPU 实例，在实例上运行 **llama.cpp server + Dolphin Mixtral GGUF**，Backend 通过 `LLM_ENDPOINT` 调用该实例的 API。
+
+### 优点
+
+- 无需在集群内配置 GPU 节点或拉取大镜像。
+- 按需租用 GPU，成本可控；可选 Dolphin Mixtral 等大模型。
+
+### 步骤概要
+
+1. **在 vast.ai 租用 GPU 实例**  
+   - 打开 [vast.ai](https://vast.ai)，创建 GPU 实例（建议至少 24GB 显存跑 Mixtral 量化版）。  
+   - 选择带 CUDA 的镜像（如 `nvidia/cuda` 或社区提供的 **llama.cpp server** 模板）。  
+   - 实例启动后会得到 **公网 IP** 和 SSH 端口；若使用模板，会直接暴露 **llama.cpp server 端口**（常见为 8081）。
+
+2. **在实例上运行 Dolphin Mixtral GGUF + llama.cpp server**  
+   - 若使用 vast.ai 的 “llama.cpp” 或 “GGUF” 模板，按模板说明上传/挂载模型并启动即可。  
+   - 若自建：在实例内下载 [Dolphin Mixtral GGUF](https://huggingface.co/cognitivecomputations/dolphin-2.9.1-mixtral-8x7b-GGUF)（例如 `dolphin-2.9.1-mixtral-8x7b-Q4_K_M.gguf`），用官方 [llama.cpp server](https://github.com/ggml-org/llama.cpp) 启动，监听 `0.0.0.0:8081`。  
+   - 记下实例的 **推理 base URL**，形如：`http://<实例公网IP>:8081`（若模板用其他端口则替换 8081）。
+
+3. **配置 Backend 使用该 API**  
+   - 将 Backend 的 **`LLM_ENDPOINT`** 设为上述 base URL，例如：  
+     `LLM_ENDPOINT=http://12.34.56.78:8081`  
+   - **不要**在集群里部署 LLM：使用外部 API 时，从 `backend/k8s/kustomization.yaml` 的 `resources` 中注释掉 `llm-deployment.yaml` 和 `llm-service.yaml`，再 `kubectl apply -k backend/k8s/`，否则会使用集群内 LLM 而非 vast.ai。  
+   - 若 Backend 在 k8s 内：在 `backend/k8s/configmap.yaml` 中设置 `LLM_ENDPOINT: "http://<vast.ai实例IP>:8081"`，或通过 Secret/环境变量覆盖。  
+   - 若 Backend 本地运行：在 `backend/.env` 中设置 `LLM_ENDPOINT=http://<vast.ai实例IP>:8081`。
+
+4. **（可选）API 鉴权**  
+   - 若在实例前挂了需要 API Key 的反向代理，可在 Backend 侧设置环境变量 **`LLM_API_KEY`**；`llm_client` 会将其放在请求头中（见 `backend/service/llm_client.go`）。
+
+### Dolphin Mixtral GGUF 推荐
+
+| 量化 | 文件名示例 | 显存约 | 说明 |
+|------|------------|--------|------|
+| Q4_K_M | dolphin-2.9.1-mixtral-8x7b-Q4_K_M.gguf | ~26GB | 质量与显存平衡 |
+| Q5_K_M | dolphin-2.9.1-mixtral-8x7b-Q5_K_M.gguf | ~32GB | 更高精度 |
+
+模型仓库：[cognitivecomputations/dolphin-2.9.1-mixtral-8x7b-GGUF](https://huggingface.co/cognitivecomputations/dolphin-2.9.1-mixtral-8x7b-GGUF)。  
+下载后重命名为 `model.gguf` 可配合本仓库 `Dockerfile.llm` 在实例内使用（见下方「方案二」）。
+
+---
+
+## 方案二：自托管 LLM 镜像（llama.cpp server）
+
+适用于在 **自己的 k8s 或 vast.ai 实例内** 构建并运行镜像。`Dockerfile.llm` 基于 `ghcr.io/ggml-org/llama.cpp:server`，将模型目录 `./models` 拷贝进镜像，在容器内监听 8081 端口。`backend/k8s/llm-deployment.yaml` 已配置从 **Docker Hub** 拉取 `damonleelcx/twixter.store-llm:latest`（需先构建并 push，见下方步骤 2–3）。
 
 ### 你需要做的
 
@@ -16,6 +59,7 @@
 
    | 用途     | 模型 | 大小  | 直接下载 |
    |----------|------|-------|----------|
+   | 方案一推荐 | [Dolphin Mixtral 8x7B](https://huggingface.co/cognitivecomputations/dolphin-2.9.1-mixtral-8x7b-GGUF) Q4_K_M | ~26GB 显存 | 见 [Hugging Face](https://huggingface.co/cognitivecomputations/dolphin-2.9.1-mixtral-8x7b-GGUF/tree/main) |
    | 本地/测试 | [Llama 3.2 3B Instruct](https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF) Q4_K_M | ~2 GB | [Llama-3.2-3B-Instruct-Q4_K_M.gguf](https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf) |
    | 效果更好 | [OpenChat 3.5](https://huggingface.co/TheBloke/openchat-3.5-1210-GGUF) Q4_K_M | ~4.4 GB | [openchat-3.5-1210.Q4_K_M.gguf](https://huggingface.co/TheBloke/openchat-3.5-1210-GGUF/resolve/main/openchat-3.5-1210.Q4_K_M.gguf) |
 

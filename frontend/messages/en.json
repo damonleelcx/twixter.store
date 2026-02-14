@@ -8,7 +8,7 @@
     "explore": "Explore",
     "notifications": "Notifications",
     "messages": "Messages",
-    "chat": "Chat",
+    "chat": "Sexting",
     "library": "Library",
     "bookmarks": "Bookmarks",
     "profile": "Profile",
@@ -25,8 +25,9 @@
     "agentName": "Agent name",
     "agentNamePlaceholder": "e.g. Luna",
     "personality": "Personality",
+    "personalityModifyHint": "You can modify",
     "saveAndStart": "Save and start chatting",
-    "creditPerMessage": "1 credit per message",
+    "creditPerMessage": "6.99 credits per message",
     "balance": "Balance",
     "messagePlaceholder": "Type a message...",
     "retry": "Retry"
@@ -177,6 +178,7 @@
     "orPayWithPayPal": "Or pay with other options",
     "shareableProfileLink": "Shareable profile link",
     "shareableProfileHint": "Share this link so others can sign up with your referral code. You earn credits when they sign up.",
+    "shareableLinkAlreadyClaimed": "You can only share your link once.",
     "copyLink": "Copy link",
     "copied": "Copied!",
     "agreeToTerms": "By signing up you agree to our",
@@ -288,7 +290,7 @@
     "adminRevenueAnalyticsTitle": "Revenue Analytics | Twixter",
     "adminRevenueAnalyticsDescription": "View content and credits revenue.",
     "chatTitle": "Chat | Twixter",
-    "chatDescription": "Agent chat. 1 credit per message."
+    "chatDescription": "Agent chat. 6.99 credits per message."
   },
   "admin": {
     "analytics": {

@@ -199,8 +199,17 @@ func InitChatService(repos *Repositories, mongoClient *mongo.Client) *service.Ch
 			log.Printf("Warning: MongoChatStore init failed: %v. Chat message history will not be persisted.", err)
 		}
 	}
-	llmEndpoint := os.Getenv("LLM_ENDPOINT")
-	return service.NewChatService(repos.ChatPersonaRepo, repos.WalletRepo, mongoChat, service.NewLLMClient(llmEndpoint))
+	// 优先 OpenRouter，其次 NinjaChat，最后自托管 LLM_ENDPOINT
+	var llmStreamer service.LLMStreamer
+	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
+		llmStreamer = service.NewOpenRouterClient()
+	} else if apiKey := os.Getenv("NINJACHAT_API_KEY"); apiKey != "" {
+		llmStreamer = service.NewNinjaChatClient()
+	} else {
+		llmEndpoint := os.Getenv("LLM_ENDPOINT")
+		llmStreamer = service.NewLLMClient(llmEndpoint)
+	}
+	return service.NewChatService(repos.ChatPersonaRepo, repos.WalletRepo, mongoChat, llmStreamer)
 }
 
 // InitControllers 初始化所有控制器

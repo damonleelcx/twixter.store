@@ -120,3 +120,14 @@ func (s *MongoChatStore) GetSession(ctx context.Context, sessionID string) (*Cha
 	}
 	return &doc, nil
 }
+
+// GetLatestSessionByUserID 按用户取最近更新的会话（用于未传 session_id 时恢复同一会话）
+func (s *MongoChatStore) GetLatestSessionByUserID(ctx context.Context, userID uint) (*ChatSession, error) {
+	opts := options.FindOne().SetSort(bson.D{{Key: "updated_at", Value: -1}})
+	var doc ChatSession
+	err := s.coll.FindOne(ctx, bson.M{"user_id": userID}, opts).Decode(&doc)
+	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
