@@ -174,8 +174,10 @@ export type CurrentUser = {
   wallet_balance?: number;
   membership_status?: "active" | "none";
   membership_expires_at?: string | null;
-  /** 是否已领取过推荐分享链接（每人仅可领取一次） */
+  /** 本月是否已领取过推荐分享链接（每月仅可领取一次） */
   shareable_link_claimed?: boolean;
+  /** 本月领取时间（ISO），用于显示“下月可再分享” */
+  shareable_link_claimed_at?: string | null;
 };
 
 /** Single in-flight promise so many components (e.g. 20 ContentCards + sidebars) trigger only one /auth/me request. Cleared when settled. */
@@ -402,7 +404,7 @@ export type ChatPersonality = {
   tone: string;
   speaking_style: string;
   boundaries: string;
-  quirks: string[];
+  quirks: string;
   emotional_range: string;
 };
 

@@ -858,13 +858,23 @@ func (s *authService) EnsureAdminSeed(adminEmail, adminPassword string) error {
 	return nil
 }
 
-// ClaimViewingTokenForReferral 为推荐链接领取 viewing token，每人仅可领取一次
+// isShareableLinkClaimedThisMonth 是否在本月已领取过分享链接（每月可领取一次）
+func isShareableLinkClaimedThisMonth(claimedAt *time.Time) bool {
+	if claimedAt == nil {
+		return false
+	}
+	now := time.Now().UTC()
+	t := claimedAt.UTC()
+	return t.Year() == now.Year() && t.Month() == now.Month()
+}
+
+// ClaimViewingTokenForReferral 为推荐链接领取 viewing token，每月仅可领取一次
 func (s *authService) ClaimViewingTokenForReferral(userID uint, mode string) (token string, alreadyClaimed bool, err error) {
 	user, err := s.userRepo.GetByIDFromShard(userID, userID)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to query user: %w", err)
 	}
-	if user.ShareableLinkClaimedAt != nil {
+	if isShareableLinkClaimedThisMonth(user.ShareableLinkClaimedAt) {
 		return "", true, nil
 	}
 	plain := "viewing_light"

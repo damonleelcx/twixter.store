@@ -8,7 +8,7 @@
     "explore": "Explore",
     "notifications": "Notifications",
     "messages": "Messages",
-    "chat": "Sexting",
+    "chat": "NSFW Chat",
     "library": "Library",
     "bookmarks": "Bookmarks",
     "profile": "Profile",
@@ -19,10 +19,10 @@
   },
   "chat": {
     "loading": "Loading...",
-    "accessDenied": "You don't have access to chat. Only dark or admin accounts can use the agent.",
-    "onboardingTitle": "Set up your agent",
-    "onboardingHint": "Give your agent a name and personality so it stays in character.",
-    "agentName": "Agent name",
+    "accessDenied": "You don't have access to chat. Only dark or admin accounts can use the Persona.",
+    "onboardingTitle": "Set up your Persona",
+    "onboardingHint": "Give your Persona a name and personality so it stays in character.",
+    "agentName": "Persona name",
     "agentNamePlaceholder": "e.g. Luna",
     "personality": "Personality",
     "personalityModifyHint": "You can modify",
@@ -178,7 +178,8 @@
     "orPayWithPayPal": "Or pay with other options",
     "shareableProfileLink": "Shareable profile link",
     "shareableProfileHint": "Share this link so others can sign up with your referral code. You earn credits when they sign up.",
-    "shareableLinkAlreadyClaimed": "You can only share your link once.",
+    "shareableLinkAlreadyClaimed": "You can only share your link once per month.",
+    "shareableLinkResetsNextMonth": "You can share again next month.",
     "copyLink": "Copy link",
     "copied": "Copied!",
     "agreeToTerms": "By signing up you agree to our",
@@ -290,7 +291,7 @@
     "adminRevenueAnalyticsTitle": "Revenue Analytics | Twixter",
     "adminRevenueAnalyticsDescription": "View content and credits revenue.",
     "chatTitle": "Chat | Twixter",
-    "chatDescription": "Agent chat. 6.99 credits per message."
+    "chatDescription": "NSFW chat. 6.99 credits per message."
   },
   "admin": {
     "analytics": {

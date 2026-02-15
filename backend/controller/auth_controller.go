@@ -5,6 +5,7 @@ import (
 	"backend/middleware"
 	"backend/service"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -446,11 +447,20 @@ func (ac *AuthController) GetCurrentUser(c *gin.Context) {
 	} else {
 		userPayload["membership_expires_at"] = nil
 	}
-	userPayload["shareable_link_claimed"] = userBase.ShareableLinkClaimedAt != nil
+	// shareable_link_claimed: true only when claimed in the current month (once per month)
+	claimedThisMonth := userBase.ShareableLinkClaimedAt != nil &&
+		userBase.ShareableLinkClaimedAt.UTC().Year() == time.Now().UTC().Year() &&
+		userBase.ShareableLinkClaimedAt.UTC().Month() == time.Now().UTC().Month()
+	userPayload["shareable_link_claimed"] = claimedThisMonth
+	if claimedThisMonth && userBase.ShareableLinkClaimedAt != nil {
+		userPayload["shareable_link_claimed_at"] = userBase.ShareableLinkClaimedAt.Format("2006-01-02T15:04:05Z07:00")
+	} else {
+		userPayload["shareable_link_claimed_at"] = nil
+	}
 	c.JSON(http.StatusOK, gin.H{"user": userPayload})
 }
 
-// GetViewingTokenForReferral 为推荐链接领取 viewing token（每人仅可领取一次，需登录）
+// GetViewingTokenForReferral 为推荐链接领取 viewing token（每月仅可领取一次，需登录）
 func (ac *AuthController) GetViewingTokenForReferral(c *gin.Context) {
 	user, exists := c.Get("user")
 	if !exists {
@@ -468,7 +478,7 @@ func (ac *AuthController) GetViewingTokenForReferral(c *gin.Context) {
 		return
 	}
 	if alreadyClaimed {
-		c.JSON(http.StatusForbidden, gin.H{"error": "already_shared", "message": "You can only share your link once"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "already_shared", "message": "You can only share your link once per month"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"token": token})
