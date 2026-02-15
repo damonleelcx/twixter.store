@@ -20,7 +20,7 @@ import { loadStripe } from "@stripe/stripe-js";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 const CREDIT_PACKAGES = [
   { credits: 69, amount: 0.69 },
@@ -153,7 +153,19 @@ function CreditsCheckoutForm({
   );
 }
 
-export default function CreditsPage() {
+function CreditsPageFallback() {
+  return (
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+      <div className="mx-auto flex max-w-[1280px]">
+        <div className="min-w-0 flex-1 border-x border-[var(--border)] md:max-w-[600px] p-6">
+          <p className="text-[var(--muted)]">Loading...</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreditsPageContent() {
   const router = useRouter();
   const params = useParams();
   const locale = (params?.locale as string) || "en";
@@ -300,5 +312,13 @@ export default function CreditsPage() {
       </div>
       <MobileBottomNav />
     </div>
+  );
+}
+
+export default function CreditsPage() {
+  return (
+    <Suspense fallback={<CreditsPageFallback />}>
+      <CreditsPageContent />
+    </Suspense>
   );
 }
