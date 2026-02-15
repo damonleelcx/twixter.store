@@ -6,6 +6,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
+import { Suspense } from "react";
 import "../globals.css";
 import { SetLocaleLang } from "./SetLocaleLang";
 
@@ -88,7 +89,9 @@ export default async function LocaleLayout({ children, params }: Props) {
         <NextIntlClientProvider messages={messages} locale={locale}>
           <SetLocaleLang locale={locale} />
           {children}
-          <ChatFab />
+          <Suspense fallback={null}>
+            <ChatFab />
+          </Suspense>
         </NextIntlClientProvider>
       </body>
     </html>

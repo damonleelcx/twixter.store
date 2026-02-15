@@ -5,6 +5,7 @@ import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import { getBaseUrlForMetadata } from "@/lib/metadata";
 import type { Metadata } from "next";
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import { Suspense } from "react";
 
 const SITE_NAME = "Twixter";
 
@@ -48,7 +49,9 @@ export default async function ChatPage({ params }: Props) {
           <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)] px-4 py-3">
             <h1 className="text-xl font-semibold">{t("chat")}</h1>
           </header>
-          <ChatContent />
+          <Suspense fallback={<div className="flex flex-1 items-center justify-center p-4 text-[var(--muted)]">Loading chat...</div>}>
+            <ChatContent />
+          </Suspense>
         </main>
         <RightSidebarWrapper />
       </div>

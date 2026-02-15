@@ -6,7 +6,7 @@ import { getViewingCookie } from "@/lib/viewing";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { NavItem } from "./NavItem";
@@ -16,7 +16,20 @@ type LeftSidebarProps = {
   locale: string;
 };
 
-export function LeftSidebar({ locale }: LeftSidebarProps) {
+function LeftSidebarFallback({ locale }: LeftSidebarProps) {
+  return (
+    <aside className="sticky top-0 hidden h-screen shrink-0 flex-col border-r border-[var(--border)] pl-4 pr-2 md:flex md:w-[68px] xl:w-[275px]">
+      <div className="flex items-center justify-between xl:justify-start xl:px-1">
+        <Link href={`/${locale}`} className="inline-flex items-center justify-center p-3 xl:px-4">
+          <span className="text-2xl font-bold text-[var(--accent)]">𝕋</span>
+        </Link>
+      </div>
+      <nav className="mt-1 flex flex-1 flex-col gap-1" aria-hidden="true" />
+    </aside>
+  );
+}
+
+function LeftSidebarContent({ locale }: LeftSidebarProps) {
   const t = useTranslations("nav");
   const tAuth = useTranslations("auth");
   const searchParams = useSearchParams();
@@ -119,5 +132,13 @@ export function LeftSidebar({ locale }: LeftSidebarProps) {
         </div>
       )}
     </aside>
+  );
+}
+
+export function LeftSidebar(props: LeftSidebarProps) {
+  return (
+    <Suspense fallback={<LeftSidebarFallback {...props} />}>
+      <LeftSidebarContent {...props} />
+    </Suspense>
   );
 }
