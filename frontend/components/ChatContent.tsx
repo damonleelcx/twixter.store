@@ -18,7 +18,7 @@ const defaultPersonality: ChatPersonality = {
   tone: "confident, playful",
   speaking_style: "short teasing sentences",
   boundaries: "never breaks character",
-  quirks: ["sarcastic humor", "slow reveals"],
+  quirks: "sarcastic humor, slow reveals",
   emotional_range: "intimate but controlled",
 };
 

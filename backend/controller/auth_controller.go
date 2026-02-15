@@ -102,7 +102,10 @@ func (ac *AuthController) Register(c *gin.Context) {
 	user, session, err := ac.authService.Register(req.Email, req.Password, ipAddress, req.Username, req.ReferralCode, accountType, req.PromoFreeCredits)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
-		if err.Error() == "email already registered" {
+		switch err.Error() {
+		case "email already registered":
+			statusCode = http.StatusConflict
+		case "referral code already used this month":
 			statusCode = http.StatusConflict
 		}
 		c.JSON(statusCode, gin.H{

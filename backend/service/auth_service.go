@@ -199,15 +199,20 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 		return nil, nil, fmt.Errorf("failed to generate referral code: %w", err)
 	}
 
-	// Validate referral code if provided
+	// Validate referral code if provided; each referrer's code can only be used once per month
 	var referredBy *uint
+	var referrer *entity.UserBase
 	if referralCode != "" {
-		referrer, err := s.userRepo.GetByReferralCode(referralCode)
+		var err error
+		referrer, err = s.userRepo.GetByReferralCode(referralCode)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, nil, errors.New("invalid referral code")
 			}
 			return nil, nil, fmt.Errorf("failed to validate referral code: %w", err)
+		}
+		if isShareableLinkClaimedThisMonth(referrer.LastReferralUsedAt) {
+			return nil, nil, errors.New("referral code already used this month")
 		}
 		referredBy = &referrer.ID
 	}
@@ -271,8 +276,8 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 			return fmt.Errorf("failed to create wallet: %w", err)
 		}
 
-		// If user was referred, give referral reward to referrer
-		if referredBy != nil {
+		// If user was referred, give referral reward to referrer and mark code as used this month
+		if referredBy != nil && referrer != nil {
 			// Add credits to referrer's wallet
 			if err := s.walletRepo.AddCredits(*referredBy, ReferralRewardCredits); err != nil {
 				return fmt.Errorf("failed to add referral reward: %w", err)
@@ -288,6 +293,13 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 			}
 			if err := s.purchaseRepo.CreateInShard(*referredBy, referrerPurchase); err != nil {
 				return fmt.Errorf("failed to create referral purchase record: %w", err)
+			}
+
+			// Mark referrer's code as used this month (one signup per month per referrer)
+			now := time.Now()
+			referrer.LastReferralUsedAt = &now
+			if err := s.userRepo.UpdateInShard(referrer.ID, referrer); err != nil {
+				return fmt.Errorf("failed to update referrer last used at: %w", err)
 			}
 		}
 
