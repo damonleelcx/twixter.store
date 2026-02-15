@@ -24,6 +24,6 @@ type PersonalitySchema struct {
 	Tone           string   `json:"tone"`
 	SpeakingStyle  string   `json:"speaking_style"`
 	Boundaries     string   `json:"boundaries"`
-	Quirks         []string `json:"quirks"`
-	EmotionalRange string   `json:"emotional_range"`
+	Quirks         string `json:"quirks"`
+	EmotionalRange string `json:"emotional_range"`
 }

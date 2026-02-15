@@ -28,7 +28,8 @@ type UserBase struct {
 	// 推荐相关字段
 	ReferralCode           string     `gorm:"uniqueIndex;size:20;index" json:"referral_code"`       // 用户的推荐码（唯一）
 	ReferredBy             *uint      `gorm:"index" json:"referred_by,omitempty"`                   // 推荐人ID（可为空）
-	ShareableLinkClaimedAt *time.Time `gorm:"type:timestamp" json:"-"`                              // 分享链接已领取时间（每人仅可领取一次）
+	ShareableLinkClaimedAt *time.Time `gorm:"type:timestamp" json:"-"`                              // 分享链接已领取时间（每月可领取一次）
+	LastReferralUsedAt     *time.Time `gorm:"type:timestamp" json:"-"`                              // 推荐码被使用时间（每月仅可被使用一次）
 
 	// 时间戳
 	CreatedAt time.Time      `json:"created_at"`

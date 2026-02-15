@@ -1,5 +1,5 @@
-import { LeftSidebar } from "@/components/LeftSidebar";
 import { ChatContent } from "@/components/ChatContent";
+import { LeftSidebar } from "@/components/LeftSidebar";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { RightSidebarWrapper } from "@/components/RightSidebarWrapper";
 import { getBaseUrlForMetadata } from "@/lib/metadata";
@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const messages = (await import(`@/messages/${locale}.json`)).default;
   const meta = messages.meta as { chatTitle?: string; chatDescription?: string };
   const title = meta?.chatTitle ?? "Chat | Twixter";
-  const description = meta?.chatDescription ?? "Agent chat.";
+  const description = meta?.chatDescription ?? "NSFW chat.";
   const canonicalUrl = `${getBaseUrlForMetadata()}/${locale}/chat`;
   return {
     title,

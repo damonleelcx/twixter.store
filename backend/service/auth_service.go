@@ -199,15 +199,20 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 		return nil, nil, fmt.Errorf("failed to generate referral code: %w", err)
 	}
 
-	// Validate referral code if provided
+	// Validate referral code if provided; each referrer's code can only be used once per month
 	var referredBy *uint
+	var referrer *entity.UserBase
 	if referralCode != "" {
-		referrer, err := s.userRepo.GetByReferralCode(referralCode)
+		var err error
+		referrer, err = s.userRepo.GetByReferralCode(referralCode)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, nil, errors.New("invalid referral code")
 			}
 			return nil, nil, fmt.Errorf("failed to validate referral code: %w", err)
+		}
+		if isShareableLinkClaimedThisMonth(referrer.LastReferralUsedAt) {
+			return nil, nil, errors.New("referral code already used this month")
 		}
 		referredBy = &referrer.ID
 	}
@@ -271,8 +276,8 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 			return fmt.Errorf("failed to create wallet: %w", err)
 		}
 
-		// If user was referred, give referral reward to referrer
-		if referredBy != nil {
+		// If user was referred, give referral reward to referrer and mark code as used this month
+		if referredBy != nil && referrer != nil {
 			// Add credits to referrer's wallet
 			if err := s.walletRepo.AddCredits(*referredBy, ReferralRewardCredits); err != nil {
 				return fmt.Errorf("failed to add referral reward: %w", err)
@@ -288,6 +293,13 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 			}
 			if err := s.purchaseRepo.CreateInShard(*referredBy, referrerPurchase); err != nil {
 				return fmt.Errorf("failed to create referral purchase record: %w", err)
+			}
+
+			// Mark referrer's code as used this month (one signup per month per referrer)
+			now := time.Now()
+			referrer.LastReferralUsedAt = &now
+			if err := s.userRepo.UpdateInShard(referrer.ID, referrer); err != nil {
+				return fmt.Errorf("failed to update referrer last used at: %w", err)
 			}
 		}
 
@@ -858,13 +870,23 @@ func (s *authService) EnsureAdminSeed(adminEmail, adminPassword string) error {
 	return nil
 }
 
-// ClaimViewingTokenForReferral 为推荐链接领取 viewing token，每人仅可领取一次
+// isShareableLinkClaimedThisMonth 是否在本月已领取过分享链接（每月可领取一次）
+func isShareableLinkClaimedThisMonth(claimedAt *time.Time) bool {
+	if claimedAt == nil {
+		return false
+	}
+	now := time.Now().UTC()
+	t := claimedAt.UTC()
+	return t.Year() == now.Year() && t.Month() == now.Month()
+}
+
+// ClaimViewingTokenForReferral 为推荐链接领取 viewing token，每月仅可领取一次
 func (s *authService) ClaimViewingTokenForReferral(userID uint, mode string) (token string, alreadyClaimed bool, err error) {
 	user, err := s.userRepo.GetByIDFromShard(userID, userID)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to query user: %w", err)
 	}
-	if user.ShareableLinkClaimedAt != nil {
+	if isShareableLinkClaimedThisMonth(user.ShareableLinkClaimedAt) {
 		return "", true, nil
 	}
 	plain := "viewing_light"

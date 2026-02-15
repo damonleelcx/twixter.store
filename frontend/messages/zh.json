@@ -19,10 +19,10 @@
   },
   "chat": {
     "loading": "加载中...",
-    "accessDenied": "您没有聊天权限。仅 dark 或管理员账户可使用 Agent。",
-    "onboardingTitle": "设置你的 Agent",
-    "onboardingHint": "为 Agent 起名并设置人格，以便保持角色一致。",
-    "agentName": "Agent 名称",
+    "accessDenied": "您没有聊天权限。仅 dark 或管理员账户可使用 Persona",
+    "onboardingTitle": "设置你的 Persona",
+    "onboardingHint": "为 Persona 起名并设置人格，以便保持角色一致。",
+    "agentName": "Persona 名称",
     "agentNamePlaceholder": "例如 Luna",
     "personality": "人格",
     "personalityModifyHint": "可修改",
@@ -178,7 +178,8 @@
     "orPayWithPayPal": "或使用其他方式支付",
     "shareableProfileLink": "可分享的个人链接",
     "shareableProfileHint": "分享此链接后，他人注册时会自动带上你的推荐码。推荐他人注册成功即可获得积分。",
-    "shareableLinkAlreadyClaimed": "您只能分享一次链接。",
+    "shareableLinkAlreadyClaimed": "您每月只能分享一次链接。",
+    "shareableLinkResetsNextMonth": "下个月可以再次分享。",
     "copyLink": "复制链接",
     "copied": "已复制！",
     "agreeToTerms": "注册即表示您同意我们的",
@@ -290,7 +291,7 @@
     "adminRevenueAnalyticsTitle": "收入分析 | Twixter",
     "adminRevenueAnalyticsDescription": "查看内容收入与积分收入。",
     "chatTitle": "聊天 | Twixter",
-    "chatDescription": "Agent 聊天，每条消息 6.99 积分。"
+    "chatDescription": "Persona 聊天，每条消息 6.99 积分。"
   },
   "admin": {
     "analytics": {

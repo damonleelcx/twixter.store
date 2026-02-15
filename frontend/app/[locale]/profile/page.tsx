@@ -37,7 +37,7 @@ export default function ProfilePage() {
     };
   }, []);
 
-  // Build shareable signup link with referral code + encrypted viewing token (same account type as parent). One-time only per user.
+  // Build shareable signup link with referral code + encrypted viewing token (same account type as parent). Once per month per user.
   useEffect(() => {
     if (!user?.referral_code) return;
     if (user.shareable_link_claimed) {
@@ -155,7 +155,10 @@ export default function ProfilePage() {
                 <p className="text-sm font-medium text-[var(--foreground)]">{t("shareableProfileLink")}</p>
                 <p className="text-sm text-[var(--muted)] mt-1">{t("shareableProfileHint")}</p>
                 {user.shareable_link_claimed || shareAlreadyClaimed ? (
-                  <p className="mt-2 text-sm text-[var(--muted)]">{t("shareableLinkAlreadyClaimed")}</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    {t("shareableLinkAlreadyClaimed")}
+                    <span className="block mt-1 text-[var(--muted)]">{t("shareableLinkResetsNextMonth")}</span>
+                  </p>
                 ) : shareableUrl ? (
                   <div className="mt-2 flex gap-2">
                     <input

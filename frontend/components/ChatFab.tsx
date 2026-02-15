@@ -7,7 +7,7 @@ import { useParams, usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 
-/** Floating action button to open chat on mobile. Shown when user has can_use_bot or when not signed in but has viewing param/cookie (e.g. viewing_dark). Hidden on chat page. */
+/** Floating action button to open chat on mobile. Shown when user has can_use_bot or when not signed in but has viewing param/cookie (e.g. viewing_dark). Click goes to chat page; sign-up redirect happens when they click Start chat on the onboarding form. Hidden on chat page. */
 export function ChatFab() {
   const params = useParams();
   const pathname = usePathname();
@@ -16,7 +16,8 @@ export function ChatFab() {
   const [hide, setHide] = useState(true);
 
   const hasViewingParamOrCookie =
-    (searchParams?.get("viewing")?.trim()?.length ?? 0) > 0 || getViewingCookie() != null;
+    (searchParams?.get("viewing")?.trim()?.length ?? 0) > 0 ||
+    getViewingCookie() != null;
 
   useEffect(() => {
     let cancelled = false;

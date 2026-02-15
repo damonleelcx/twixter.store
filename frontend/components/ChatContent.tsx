@@ -1,14 +1,16 @@
 "use client";
 
 import {
+  fetchCurrentUser,
   getChatSession,
   postChatOnboarding,
   postChatStream,
   type ChatPersonality,
   type ChatSessionResponse,
-  fetchCurrentUser,
 } from "@/lib/api";
+import { getViewingCookie } from "@/lib/viewing";
 import { useTranslations } from "next-intl";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
@@ -16,12 +18,21 @@ const defaultPersonality: ChatPersonality = {
   tone: "confident, playful",
   speaking_style: "short teasing sentences",
   boundaries: "never breaks character",
-  quirks: ["sarcastic humor", "slow reveals"],
+  quirks: "sarcastic humor, slow reveals",
   emotional_range: "intimate but controlled",
 };
 
+const MAX_CHARS_PER_FIELD = 50;
+function limitToMaxChars(value: string, max = MAX_CHARS_PER_FIELD): string {
+  return value.slice(0, max);
+}
+
 export function ChatContent() {
   const t = useTranslations("chat");
+  const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const locale = (params?.locale as string) || "en";
   const [state, setState] = useState<
     "loading" | "denied" | "onboarding" | "ready" | "error"
   >("loading");
@@ -34,30 +45,49 @@ export function ChatContent() {
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  /** When true, user is not signed in but has viewing_dark; show onboarding and redirect to sign up on Start chat */
+  const [onboardingAsGuest, setOnboardingAsGuest] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const loadSession = useCallback(async (sessionId?: string) => {
-    setState("loading");
-    setErrorMsg(null);
-    try {
-      const data = await getChatSession(sessionId ?? session?.session_id);
-      setSession(data);
-      if (data.need_onboarding) {
-        setState("onboarding");
-      } else {
-        setState("ready");
-        setMessages(data.messages?.map((m) => ({ role: m.role, content: m.content })) ?? []);
+  const hasViewingParamOrCookie =
+    (searchParams?.get("viewing")?.trim()?.length ?? 0) > 0 ||
+    getViewingCookie() != null;
+
+  const loadSession = useCallback(
+    async (sessionId?: string) => {
+      setState("loading");
+      setErrorMsg(null);
+      setOnboardingAsGuest(false);
+      try {
+        const data = await getChatSession(sessionId ?? session?.session_id);
+        setSession(data);
+        if (data.need_onboarding) {
+          setState("onboarding");
+        } else {
+          setState("ready");
+          setMessages(data.messages?.map((m) => ({ role: m.role, content: m.content })) ?? []);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const isAuthError =
+          msg.includes("don't have access") ||
+          msg.includes("403") ||
+          msg.includes("401") ||
+          msg.toLowerCase().includes("unauthorized") ||
+          msg.toLowerCase().includes("authorization");
+        if (isAuthError && hasViewingParamOrCookie) {
+          setState("onboarding");
+          setOnboardingAsGuest(true);
+        } else if (msg.includes("don't have access") || msg.includes("403")) {
+          setState("denied");
+        } else {
+          setState("error");
+          setErrorMsg(msg);
+        }
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("don't have access") || msg.includes("403")) {
-        setState("denied");
-      } else {
-        setState("error");
-        setErrorMsg(msg);
-      }
-    }
-  }, [session?.session_id]);
+    },
+    [session?.session_id, hasViewingParamOrCookie]
+  );
 
   useEffect(() => {
     loadSession();
@@ -79,6 +109,13 @@ export function ChatContent() {
     e.preventDefault();
     if (!name.trim()) return;
     setErrorMsg(null);
+    if (onboardingAsGuest) {
+      const viewingToken =
+        getViewingCookie() ?? searchParams?.get("viewing")?.trim() ?? null;
+      const signupUrl = `/${locale}/auth/signup${viewingToken ? `?viewing=${encodeURIComponent(viewingToken)}` : ""}`;
+      router.push(signupUrl);
+      return;
+    }
     try {
       await postChatOnboarding(name.trim(), personality);
       await loadSession(session?.session_id);
@@ -162,43 +199,96 @@ export function ChatContent() {
             <div className="grid gap-2 text-sm">
               <input
                 type="text"
-                value={personality.tone}
-                onChange={(e) => setPersonality((p) => ({ ...p, tone: e.target.value }))}
+                value={limitToMaxChars(personality.tone)}
+                maxLength={MAX_CHARS_PER_FIELD}
+                onChange={(e) =>
+                  setPersonality((p) => ({ ...p, tone: limitToMaxChars(e.target.value) }))
+                }
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData("text/plain");
+                  setPersonality((p) => ({ ...p, tone: limitToMaxChars(text) }));
+                }}
                 className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
-                placeholder="tone"
+                placeholder="tone (max 50 chars)"
               />
               <input
                 type="text"
-                value={personality.speaking_style}
-                onChange={(e) => setPersonality((p) => ({ ...p, speaking_style: e.target.value }))}
-                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
-                placeholder="speaking_style"
-              />
-              <input
-                type="text"
-                value={personality.boundaries}
-                onChange={(e) => setPersonality((p) => ({ ...p, boundaries: e.target.value }))}
-                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
-                placeholder="boundaries"
-              />
-              <input
-                type="text"
-                value={personality.quirks.join(", ")}
+                value={limitToMaxChars(personality.speaking_style)}
+                maxLength={MAX_CHARS_PER_FIELD}
                 onChange={(e) =>
                   setPersonality((p) => ({
                     ...p,
-                    quirks: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    speaking_style: limitToMaxChars(e.target.value),
                   }))
                 }
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData("text/plain");
+                  setPersonality((p) => ({ ...p, speaking_style: limitToMaxChars(text) }));
+                }}
                 className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
-                placeholder="quirks (comma-separated)"
+                placeholder="speaking_style (max 50 chars)"
               />
               <input
                 type="text"
-                value={personality.emotional_range}
-                onChange={(e) => setPersonality((p) => ({ ...p, emotional_range: e.target.value }))}
+                value={limitToMaxChars(personality.boundaries)}
+                maxLength={MAX_CHARS_PER_FIELD}
+                onChange={(e) =>
+                  setPersonality((p) => ({
+                    ...p,
+                    boundaries: limitToMaxChars(e.target.value),
+                  }))
+                }
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData("text/plain");
+                  setPersonality((p) => ({ ...p, boundaries: limitToMaxChars(text) }));
+                }}
                 className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
-                placeholder="emotional_range"
+                placeholder="boundaries (max 50 chars)"
+              />
+              <input
+                type="text"
+                value={limitToMaxChars(personality.quirks)}
+                maxLength={MAX_CHARS_PER_FIELD}
+                onChange={(e) => {
+                  setPersonality((p) => ({
+                    ...p,
+                    quirks: limitToMaxChars(e.target.value),
+                  }));
+                }}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData("text/plain");
+                  setPersonality((p) => ({
+                    ...p,
+                    quirks: limitToMaxChars(text),
+                  }));
+                }}
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+                placeholder="quirks, comma-separated (max 50 chars)"
+              />
+              <input
+                type="text"
+                value={limitToMaxChars(personality.emotional_range)}
+                maxLength={MAX_CHARS_PER_FIELD}
+                onChange={(e) =>
+                  setPersonality((p) => ({
+                    ...p,
+                    emotional_range: limitToMaxChars(e.target.value),
+                  }))
+                }
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData("text/plain");
+                  setPersonality((p) => ({
+                    ...p,
+                    emotional_range: limitToMaxChars(text),
+                  }));
+                }}
+                className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+                placeholder="emotional_range (max 50 chars)"
               />
             </div>
           </div>
