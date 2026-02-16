@@ -604,6 +604,8 @@ func (s *authService) RequestPasswordReset(email string) error {
 		if err := s.emailService.SendPasswordResetEmail(user.Email, resetLink); err != nil {
 			log.Printf("Failed to send password reset email to %s: %v", user.Email, err)
 			// 不向调用方返回错误，避免泄露该邮箱是否已注册
+		} else {
+			log.Printf("Password reset email sent to %s", user.Email)
 		}
 	} else {
 		fmt.Printf("Password reset token: %s (for testing only, set SMTP_* env to send email)\n", token)
