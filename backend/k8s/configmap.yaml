@@ -20,6 +20,8 @@ data:
   SMTP_HOST: "10.42.0.1"
   SMTP_PORT: "465"
   SMTP_USE_TLS: "1"
+  # 当 SMTP_HOST 为内网 IP 且证书无 IP SAN 时，设 1 跳过 TLS 证书校验（仅内网/自签证书时使用）
+  SMTP_INSECURE_SKIP_VERIFY: "1"
   # 聊天：MongoDB 消息历史（集群内 Service 名）
   # MONGO_URI: "mongodb://mongodb:27017"
   # 自托管 LLM（llama.cpp server）；不设则聊天流式返回占位文案
