@@ -27,6 +27,32 @@ function limitToMaxChars(value: string, max = MAX_CHARS_PER_FIELD): string {
   return value.slice(0, max);
 }
 
+function formatMessageTime(iso?: string, locale = "en"): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const isToday =
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear();
+    if (isToday) {
+      return d.toLocaleTimeString(locale, {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    return d.toLocaleString(locale, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export function ChatContent() {
   const t = useTranslations("chat");
   const params = useParams();
@@ -40,7 +66,9 @@ export function ChatContent() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [personality, setPersonality] = useState<ChatPersonality>(defaultPersonality);
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [messages, setMessages] = useState<
+    { role: string; content: string; created_at?: string }[]
+  >([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
@@ -65,7 +93,13 @@ export function ChatContent() {
           setState("onboarding");
         } else {
           setState("ready");
-          setMessages(data.messages?.map((m) => ({ role: m.role, content: m.content })) ?? []);
+          setMessages(
+          data.messages?.map((m) => ({
+            role: m.role,
+            content: m.content,
+            created_at: m.created_at,
+          })) ?? []
+        );
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -128,7 +162,10 @@ export function ChatContent() {
     const text = input.trim();
     if (!text || streaming || !session?.session_id) return;
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: text, created_at: new Date().toISOString() },
+    ]);
     setStreaming(true);
     setStreamingContent("");
     try {
@@ -137,7 +174,14 @@ export function ChatContent() {
         full += chunk;
         setStreamingContent(full);
       });
-      setMessages((prev) => [...prev, { role: "assistant", content: full }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: full,
+          created_at: new Date().toISOString(),
+        },
+      ]);
       const u = await fetchCurrentUser();
       if (u?.wallet_balance != null) setWalletBalance(u.wallet_balance);
       window.dispatchEvent(new CustomEvent("wallet-updated"));
@@ -323,6 +367,17 @@ export function ChatContent() {
               }`}
             >
               <p className="whitespace-pre-wrap text-sm">{m.content}</p>
+              {m.created_at && (
+                <p
+                  className={`mt-1 text-xs opacity-80 ${
+                    m.role === "user"
+                      ? "text-[var(--accent-foreground)]"
+                      : "text-[var(--muted)]"
+                  }`}
+                >
+                  {formatMessageTime(m.created_at, locale)}
+                </p>
+              )}
             </div>
           </div>
         ))}
