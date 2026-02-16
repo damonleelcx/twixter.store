@@ -19,17 +19,21 @@ type EmailService interface {
 
 // emailService SMTP 实现
 type emailService struct {
-	host     string
-	port     int
-	user     string
-	password string
-	from     string
-	useTLS   bool // true: 465 隐式 TLS；false: 587 STARTTLS
+	host               string
+	port               int
+	user               string
+	password           string
+	from               string
+	useTLS             bool   // true: 465 隐式 TLS；false: 587 STARTTLS
+	tlsServerName      string // 可选：TLS 校验用的 ServerName（连接用 host 时若证书无 IP SAN 可设此项）
+	insecureSkipVerify bool   // 可选：跳过 TLS 证书校验（仅内网/自签证书时使用）
 }
 
 // NewEmailService 从环境变量创建邮件服务。
 // 需要: SMTP_HOST, SMTP_USER, SMTP_PASSWORD
 // 可选: SMTP_PORT (默认 465), SMTP_FROM (默认 SMTP_USER), SMTP_USE_TLS (1/true 表示 465 隐式 TLS)
+//       SMTP_TLS_SERVER_NAME (TLS 校验用的主机名，当 SMTP_HOST 为 IP 且证书无 IP SAN 时设置)
+//       SMTP_INSECURE_SKIP_VERIFY (1/true 跳过 TLS 证书校验，仅内网/自签证书时使用)
 // 若 SMTP_HOST 为空则返回 (nil, nil)，表示未配置邮件。
 func NewEmailService() (EmailService, error) {
 	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
@@ -57,14 +61,33 @@ func NewEmailService() (EmailService, error) {
 	if v := strings.TrimSpace(strings.ToLower(os.Getenv("SMTP_USE_TLS"))); v == "1" || v == "true" || v == "yes" {
 		useTLS = true
 	}
+	tlsServerName := strings.TrimSpace(os.Getenv("SMTP_TLS_SERVER_NAME"))
+	insecureSkipVerify := false
+	if v := strings.TrimSpace(strings.ToLower(os.Getenv("SMTP_INSECURE_SKIP_VERIFY"))); v == "1" || v == "true" || v == "yes" {
+		insecureSkipVerify = true
+	}
 	return &emailService{
-		host:     host,
-		port:     port,
-		user:     user,
-		password: password,
-		from:     from,
-		useTLS:   useTLS,
+		host:               host,
+		port:               port,
+		user:               user,
+		password:           password,
+		from:               from,
+		useTLS:             useTLS,
+		tlsServerName:      tlsServerName,
+		insecureSkipVerify: insecureSkipVerify,
 	}, nil
+}
+
+// buildTLSConfig 构建 TLS 配置：ServerName 优先用 SMTP_TLS_SERVER_NAME，否则用 host；可选跳过证书校验。
+func (e *emailService) buildTLSConfig() *tls.Config {
+	serverName := e.host
+	if e.tlsServerName != "" {
+		serverName = e.tlsServerName
+	}
+	return &tls.Config{
+		ServerName:         serverName,
+		InsecureSkipVerify: e.insecureSkipVerify,
+	}
 }
 
 // SendPasswordResetEmail 发送密码重置邮件
@@ -81,9 +104,9 @@ func (e *emailService) SendPasswordResetEmail(to, resetLink string) error {
 	auth := smtp.PlainAuth("", e.user, e.password, e.host)
 
 	const dialTimeout = 15 * time.Second
+	tlsConfig := e.buildTLSConfig()
 	if e.useTLS {
 		// 隐式 TLS (如 465)
-		tlsConfig := &tls.Config{ServerName: e.host}
 		dialer := &net.Dialer{Timeout: dialTimeout}
 		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 		if err != nil {
@@ -129,7 +152,6 @@ func (e *emailService) SendPasswordResetEmail(to, resetLink string) error {
 	}
 	defer client.Close()
 	if ok, _ := client.Extension("STARTTLS"); ok {
-		tlsConfig := &tls.Config{ServerName: e.host}
 		if err = client.StartTLS(tlsConfig); err != nil {
 			return fmt.Errorf("smtp starttls: %w", err)
 		}
