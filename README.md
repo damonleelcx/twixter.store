@@ -1055,3 +1055,5 @@ kubectl logs deployment/twixter-backend
 ```
 
 若仍报错，把新的 `kubectl logs` 最后几行贴出来即可。
+
+`tail -200 /var/log/maillog`

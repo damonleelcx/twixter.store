@@ -321,6 +321,80 @@ func (v *videoProcessingService) BlurGif(inputPath, outputPath string) error {
 	return nil
 }
 
+// isNvencRelatedError 判断 ffmpeg stderr 是否与 NVENC/10-bit/设备不支持相关，用于决定是否回退 CPU
+func (v *videoProcessingService) isNvencRelatedError(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "10 bit encode not supported") ||
+		strings.Contains(s, "nvenc") ||
+		strings.Contains(s, "provided device doesn't support") ||
+		strings.Contains(s, "error while opening encoder") ||
+		strings.Contains(s, "function not implemented") ||
+		strings.Contains(s, "could not open encoder")
+}
+
+// buildHLSArgs 构建 HLS 转码的 ffmpeg 参数；useGPU 为 true 时使用 CUDA/NVENC，否则使用 libx264
+func (v *videoProcessingService) buildHLSArgs(inputPath, playlistPath, segmentPattern string, options *TranscodeOptions, useGPU bool) []string {
+	var args []string
+	if useGPU {
+		codec := options.Codec
+		if codec == "" || codec == "libx264" {
+			codec = "h264_nvenc"
+		}
+		quality := options.Quality
+		if quality == "" || quality == "medium" {
+			quality = "p4"
+		}
+		args = []string{
+			"-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+			"-i", toFFmpegPath(inputPath),
+			"-c:v", codec,
+			"-preset", quality,
+		}
+		if options.Bitrate != "" {
+			args = append(args, "-b:v", options.Bitrate)
+		}
+		resolutionParts := strings.Split(options.Resolution, "x")
+		scaleArg := "1920:-2"
+		if len(resolutionParts) == 2 {
+			scaleArg = resolutionParts[0] + ":-2"
+		}
+		args = append(args, "-vf", "scale_cuda="+scaleArg+":format=nv12")
+	} else {
+		codec := options.Codec
+		if codec == "" {
+			codec = "libx264"
+		}
+		quality := options.Quality
+		if quality == "" {
+			quality = "medium"
+		}
+		args = []string{
+			"-i", toFFmpegPath(inputPath),
+			"-c:v", codec,
+			"-preset", quality,
+		}
+		if options.Bitrate != "" {
+			args = append(args, "-b:v", options.Bitrate)
+		}
+		resolutionParts := strings.Split(options.Resolution, "x")
+		if len(resolutionParts) == 2 {
+			args = append(args, "-vf", fmt.Sprintf("scale=%s:-2", resolutionParts[0]))
+		} else {
+			args = append(args, "-vf", "scale=1920:-2")
+		}
+	}
+	args = append(args, "-c:a", "aac", "-b:a", "128k")
+	args = append(args,
+		"-hls_time", "10",
+		"-hls_list_size", "0",
+		"-hls_segment_filename", toFFmpegPath(segmentPattern),
+		"-hls_flags", "independent_segments",
+		"-y",
+		toFFmpegPath(playlistPath),
+	)
+	return args
+}
+
 // TranscodeVideo 转码视频为HLS格式（.m3u8 + .ts 分片）
 func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName string, options *TranscodeOptions) (*HLSOutput, error) {
 	// 规范为绝对路径，避免 Windows 下相对路径或不同写法导致目录“找不到”
@@ -360,81 +434,29 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 	playlistPath := filepath.Join(outputDir, outputName+".m3u8")
 	segmentPattern := filepath.Join(outputDir, outputName+"_%03d.ts")
 
-	var args []string
-	if useGPU {
-		// GPU 管线：CUDA 解码 + scale_cuda + h264_nvenc（需 FFmpeg 编译时启用 nvenc/cuda）
-		codec := options.Codec
-		if codec == "" || codec == "libx264" {
-			codec = "h264_nvenc"
-		}
-		quality := options.Quality
-		if quality == "" || quality == "medium" {
-			quality = "p4" // NVENC p1(最快)..p7(最慢/质量最好)
-		}
-		args = []string{
-			"-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
-			"-i", toFFmpegPath(inputPath),
-			"-c:v", codec,
-			"-preset", quality,
-		}
-		if options.Bitrate != "" {
-			args = append(args, "-b:v", options.Bitrate)
-		}
-		resolutionParts := strings.Split(options.Resolution, "x")
-		scaleArg := "1920:-2"
-		if len(resolutionParts) == 2 {
-			scaleArg = resolutionParts[0] + ":-2"
-		}
-		// scale_cuda 保持宽高比；-2 保证偶数
-		args = append(args, "-vf", "scale_cuda="+scaleArg)
-	} else {
-		// 原有 CPU 管线：libx264
-		codec := options.Codec
-		if codec == "" {
-			codec = "libx264"
-		}
-		quality := options.Quality
-		if quality == "" {
-			quality = "medium"
-		}
-		args = []string{
-			"-i", toFFmpegPath(inputPath),
-			"-c:v", codec,
-			"-preset", quality,
-		}
-		if options.Bitrate != "" {
-			args = append(args, "-b:v", options.Bitrate)
-		}
-		resolutionParts := strings.Split(options.Resolution, "x")
-		if len(resolutionParts) == 2 {
-			args = append(args, "-vf", fmt.Sprintf("scale=%s:-2", resolutionParts[0]))
-		} else {
-			args = append(args, "-vf", "scale=1920:-2")
-		}
-	}
-
-	// 音频编码
-	args = append(args, "-c:a", "aac", "-b:a", "128k")
-
-	// HLS 特定参数（路径统一转成 FFmpeg 可识别的形式，避免 Windows 反斜杠问题）
-	args = append(args,
-		"-hls_time", "10", // 每个分片10秒
-		"-hls_list_size", "0", // 0表示包含所有分片
-		"-hls_segment_filename", toFFmpegPath(segmentPattern), // 分片文件命名模式
-		"-hls_flags", "independent_segments", // 独立分片标志
-		"-y",
-		toFFmpegPath(playlistPath), // 输出 .m3u8 播放列表
-	)
+	args := v.buildHLSArgs(inputPath, playlistPath, segmentPattern, options, useGPU)
 
 	cmd := exec.Command(v.ffmpegPath, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	// 运行转码命令
+	// 运行转码命令；若启用 GPU 且失败与 NVENC/10-bit/设备相关，则回退到 CPU
 	if err := cmd.Run(); err != nil {
+		stderrStr := stderr.String()
+		if useGPU && v.isNvencRelatedError(stderrStr) {
+			// 使用 CPU 管线重试（libx264，无 hwaccel）
+			cpuArgs := v.buildHLSArgs(inputPath, playlistPath, segmentPattern, options, false)
+			cmdCPU := exec.Command(v.ffmpegPath, cpuArgs...)
+			var stderrCPU bytes.Buffer
+			cmdCPU.Stderr = &stderrCPU
+			if runErr := cmdCPU.Run(); runErr == nil {
+				// CPU 转码成功，继续后续逻辑
+				goto afterTranscode
+			}
+			// CPU 也失败则用原始 GPU 错误返回
+		}
 		if stderr.Len() > 0 {
 			ffmpegErr := strings.TrimSpace(stderr.String())
-			// 取末尾一段（错误信息通常在 stderr 末尾，前面是 version banner）
 			if len(ffmpegErr) > 1500 {
 				ffmpegErr = "... " + ffmpegErr[len(ffmpegErr)-1500:]
 			}
@@ -442,6 +464,7 @@ func (v *videoProcessingService) TranscodeVideo(inputPath, outputDir, outputName
 		}
 		return nil, fmt.Errorf("failed to transcode video to HLS: %w", err)
 	}
+afterTranscode:
 
 	// 转码后确认输出目录仍存在（Windows 下路径不一致或目录未创建时便于排查）
 	if fi, err := os.Stat(outputDir); err != nil {
