@@ -589,9 +589,9 @@ func (s *authService) RequestPasswordReset(email string) error {
 		return fmt.Errorf("failed to generate reset token: %w", err)
 	}
 
-	// Set token and expiration time
-	now := time.Now()
-	expiresAt := now.Add(PasswordResetTokenDuration)
+	// Set token and expiration time (use UTC to avoid timezone mismatch with DB/driver)
+	nowUTC := time.Now().UTC()
+	expiresAt := nowUTC.Add(PasswordResetTokenDuration)
 	user.PasswordResetToken = token
 	user.PasswordResetExpires = &expiresAt
 
@@ -654,8 +654,12 @@ func (s *authService) ResetPassword(token, newPassword string) error {
 		return errors.New("reset token invalid")
 	}
 
-	// Check if token is expired
-	if user.PasswordResetExpires == nil || time.Now().After(*user.PasswordResetExpires) {
+	// Check if token is expired (compare in UTC to match how we set it)
+	if user.PasswordResetExpires == nil {
+		return errors.New("reset token expired")
+	}
+	expiresUTC := user.PasswordResetExpires.UTC()
+	if time.Now().UTC().After(expiresUTC) {
 		return errors.New("reset token expired")
 	}
 

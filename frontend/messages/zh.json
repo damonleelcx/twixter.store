@@ -152,7 +152,7 @@
     "backToSignIn": "返回登录",
     "successReset": "密码已重置，现在可以登录。",
     "errorGeneric": "出错了，请重试。",
-    "forgotPasswordSuccess": "若存在与 {email} 对应的账号，我们已发送重置链接，请查收邮件。",
+    "forgotPasswordSuccess": "若存在与 {email} 对应的账号，我们已发送重置链接，请查收邮件或spam文件夹。",
     "requestNewLink": "重新获取链接",
     "errorPasswordMin": "密码至少需要 8 个字符",
     "errorPasswordMismatch": "两次输入的密码不一致",
