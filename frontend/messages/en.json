@@ -152,7 +152,7 @@
     "backToSignIn": "Back to sign in",
     "successReset": "Password reset. You can sign in now.",
     "errorGeneric": "Something went wrong. Try again.",
-    "forgotPasswordSuccess": "If an account exists for {email}, we sent a password reset link. Check your inbox.",
+    "forgotPasswordSuccess": "If an account exists for {email}, we sent a password reset link. Check your inbox or spam folder.",
     "requestNewLink": "Request a new link",
     "errorPasswordMin": "Password must be at least 8 characters",
     "errorPasswordMismatch": "Passwords do not match",
