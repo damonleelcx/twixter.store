@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.18",
     "@paypal/react-paypal-js": "^8.9.2",
     "@sentry/nextjs": "10",
     "@stripe/react-stripe-js": "^5.6.0",
