@@ -20,7 +20,7 @@ const (
 type UserBase struct {
 	ID          uint        `gorm:"primaryKey" json:"id"`
 	Email       string      `gorm:"uniqueIndex;not null;size:255" json:"email"`
-	Username    string      `gorm:"uniqueIndex;size:100" json:"username"` // 用户名（可选，可为空）
+	Username    *string     `gorm:"uniqueIndex;size:100" json:"username,omitempty"` // 用户名（可选；空则存 NULL，避免唯一约束冲突）
 	Password    string      `gorm:"not null;size:255" json:"-"`           // 不序列化密码字段
 	AccountType AccountType `gorm:"type:varchar(20);not null;default:'light'" json:"account_type"`
 	IPAddress   string      `gorm:"size:45" json:"ip_address"` // IPv6 最大长度为 45

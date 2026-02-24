@@ -159,8 +159,64 @@ func getJWTSecret() string {
 	return secret
 }
 
+// usernameFromEmailStem generates a unique username from email local part + random padding (e.g. john.doe_a1B2x9Kp).
+func (s *authService) usernameFromEmailStem(email string) (string, error) {
+	stem := email
+	if idx := strings.Index(email, "@"); idx != -1 {
+		stem = email[:idx]
+	}
+	// Sanitize: keep only alphanumeric, dot, underscore; replace dots with underscore; limit length
+	var b strings.Builder
+	const maxStemLen = 85
+	for i, r := range stem {
+		if i >= maxStemLen {
+			break
+		}
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+		case r == '.':
+			b.WriteByte('_')
+		}
+	}
+	stem = b.String()
+	if stem == "" {
+		stem = "user"
+	}
+	// Random alphanumeric padding (8 chars)
+	const paddingChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	pad := make([]byte, 8)
+	if _, err := rand.Read(pad); err != nil {
+		return "", fmt.Errorf("random padding: %w", err)
+	}
+	for i := range pad {
+		pad[i] = paddingChars[int(pad[i])%len(paddingChars)]
+	}
+	return stem + "_" + string(pad), nil
+}
+
 // Register User registration
 func (s *authService) Register(email, password, ipAddress, username, referralCode string, accountType entity.AccountType, promoFreeCredits bool) (*entity.UserBase, *entity.Session, error) {
+	username = strings.TrimSpace(username)
+
+	// If no username provided, generate one from email stem + random padding
+	if username == "" {
+		for attempt := 0; attempt < 5; attempt++ {
+			generated, err := s.usernameFromEmailStem(email)
+			if err != nil {
+				return nil, nil, fmt.Errorf("generate username from email: %w", err)
+			}
+			username = generated
+			var existing0 entity.UserShard0
+			var existing1 entity.UserShard1
+			taken0 := s.db.Where("username = ?", username).First(&existing0).Error == nil
+			taken1 := s.db.Where("username = ?", username).First(&existing1).Error == nil
+			if !taken0 && !taken1 {
+				break // unique, use this username
+			}
+		}
+	}
+
 	// Check if email already exists
 	existingUser, err := s.userRepo.GetByEmailFromShard(email)
 	if err == nil && existingUser != nil {
@@ -170,21 +226,18 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 		return nil, nil, fmt.Errorf("failed to query user: %w", err)
 	}
 
-	// Check if username already exists (if provided)
-	if username != "" {
-		// Search for existing username in both shards
-		var existingUser0 entity.UserShard0
-		var existingUser1 entity.UserShard1
-		if err := s.db.Where("username = ?", username).First(&existingUser0).Error; err == nil {
-			return nil, nil, errors.New("username already taken")
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, fmt.Errorf("failed to check username: %w", err)
-		}
-		if err := s.db.Where("username = ?", username).First(&existingUser1).Error; err == nil {
-			return nil, nil, errors.New("username already taken")
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil, fmt.Errorf("failed to check username: %w", err)
-		}
+	// Check if username already exists
+	var existingUser0 entity.UserShard0
+	var existingUser1 entity.UserShard1
+	if err := s.db.Where("username = ?", username).First(&existingUser0).Error; err == nil {
+		return nil, nil, errors.New("username already taken")
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("failed to check username: %w", err)
+	}
+	if err := s.db.Where("username = ?", username).First(&existingUser1).Error; err == nil {
+		return nil, nil, errors.New("username already taken")
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("failed to check username: %w", err)
 	}
 
 	// Hash password
@@ -217,10 +270,10 @@ func (s *authService) Register(email, password, ipAddress, username, referralCod
 		referredBy = &referrer.ID
 	}
 
-	// Create user
+	// Username is either user-provided or generated from email stem + random padding
 	user := &entity.UserBase{
 		Email:        email,
-		Username:     username, // Username from request (can be empty)
+		Username:     &username,
 		Password:     hashedPassword,
 		AccountType:  accountType, // 根据注册来源设置账户类型
 		IPAddress:    ipAddress,
@@ -831,9 +884,10 @@ func (s *authService) EnsureAdminSeed(adminEmail, adminPassword string) error {
 	if err != nil {
 		return fmt.Errorf("generate referral code: %w", err)
 	}
+	adminUsername := "twixter_user"
 	user := &entity.UserBase{
 		Email:        adminEmail,
-		Username:     "twixter_user",
+		Username:     &adminUsername,
 		Password:     hashedPassword,
 		AccountType:  entity.AccountTypeAdmin,
 		ReferralCode: newReferralCode,
