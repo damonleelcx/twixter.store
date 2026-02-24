@@ -751,8 +751,8 @@ func (s *contentService) GetAuthorForUserID(userID uint) (username string, avata
 		return "", ""
 	}
 	if u, err := s.userRepo.GetByIDFromShard(userID, userID); err == nil && u != nil {
-		if u.Username != "" {
-			return u.Username, ""
+		if u.Username != nil && *u.Username != "" {
+			return *u.Username, ""
 		}
 		if u.Email != "" {
 			return u.Email, ""
@@ -760,8 +760,8 @@ func (s *contentService) GetAuthorForUserID(userID uint) (username string, avata
 		return "", ""
 	}
 	if u, err := s.userRepo.GetByID(userID); err == nil && u != nil {
-		if u.Username != "" {
-			return u.Username, ""
+		if u.Username != nil && *u.Username != "" {
+			return *u.Username, ""
 		}
 		if u.Email != "" {
 			return u.Email, ""
