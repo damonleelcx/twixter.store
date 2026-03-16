@@ -570,6 +570,17 @@ export function getContentFilePreviewUrlSameOrigin(fileId: number): string {
   return getContentFilePreviewUrl(fileId);
 }
 
+/** Report video duration from client (e.g. from video.duration). Backend only stores when DB has no duration. Requires auth. */
+export async function updateContentFileDuration(fileId: number, durationSeconds: number): Promise<void> {
+  const base = getApiBase();
+  const res = await fetchWithAuth(`${base}/content/files/${fileId}/duration`, {
+    method: "PATCH",
+    body: JSON.stringify({ duration_seconds: durationSeconds }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Failed to update duration");
+}
+
 /** Get content by id. Auth or viewing_dark cookie for dark. Optional viewing param for unauthenticated dark access. */
 export async function getContentById(
   id: number,

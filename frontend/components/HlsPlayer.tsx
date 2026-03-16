@@ -1,6 +1,6 @@
 "use client";
 
-import { getAccessToken, getApiBase, recordWatchProgress } from "@/lib/api";
+import { getAccessToken, getApiBase, recordWatchProgress, updateContentFileDuration } from "@/lib/api";
 import Hls from "hls.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -35,6 +35,7 @@ export function HlsPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const lastReportedTimeRef = useRef(0);
+  const durationReportedToBackendRef = useRef(false);
   const [showPlayOverlay, setShowPlayOverlay] = useState(true);
   const [wrapperStyle, setWrapperStyle] = useState<React.CSSProperties>({});
 
@@ -126,12 +127,24 @@ export function HlsPlayer({
       } else {
         setWrapperStyle({});
       }
+      // Only report duration to DB when it's not already stored (same check as PostContent/ContentCard: duration from API is null or <= 0)
+      const durationAlreadyInDb = durationSeconds != null && durationSeconds > 0;
+      if (durationAlreadyInDb) return;
+      const dur = video.duration;
+      if (
+        Number.isFinite(dur) &&
+        dur > 0 &&
+        !durationReportedToBackendRef.current
+      ) {
+        durationReportedToBackendRef.current = true;
+        updateContentFileDuration(fileId, dur).catch(() => {});
+      }
     };
 
     video.addEventListener("loadedmetadata", onLoadedMetadata);
     if (video.videoWidth > 0) onLoadedMetadata();
     return () => video.removeEventListener("loadedmetadata", onLoadedMetadata);
-  }, [factor]);
+  }, [factor, fileId, durationSeconds]);
 
   useEffect(() => {
     const video = videoRef.current;

@@ -12,6 +12,7 @@ import {
   removeBookmark,
   type ContentDetail,
 } from "@/lib/api";
+import { getResolutionLabel } from "@/lib/resolution";
 import { buildShareUrl } from "@/lib/viewing";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
@@ -177,7 +178,8 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
           firstFile?.height != null &&
           firstFile.width > 0 &&
           firstFile.height > 0
-        ? `${firstFile.width}×${firstFile.height}`
+        ? (getResolutionLabel(firstFile.width, firstFile.height) ??
+            `${firstFile.width}×${firstFile.height}`)
         : null;
 
   // 未购买时 wrapper 宽高比需与内容一致（竖屏时按 1.5 倍压缩）；无尺寸时不强制，避免横屏被误成竖屏

@@ -40,6 +40,8 @@ type ContentService interface {
 
 	// UpdateFileStage 更新文件处理阶段
 	UpdateFileStage(fileID uint, stage entity.FileProcessingStage) error
+	// UpdateFileDuration 在 DB 未记录时长时，用客户端上报的时长更新 content_file.duration（仅当当前为 nil 或 <=0 时写入）
+	UpdateFileDuration(fileID uint, durationSeconds float64) error
 
 	// GetTranscodedFile 获取转码文件信息
 	GetTranscodedFile(fileID uint) (*entity.ContentFile, error)
@@ -474,6 +476,26 @@ func (s *contentService) UpdateFileStage(fileID uint, stage entity.FileProcessin
 		file.ProcessedAt = &now
 	}
 
+	return s.fileRepo.Update(file)
+}
+
+// UpdateFileDuration 仅在 DB 中时长为空或 0 时，写入客户端上报的时长（防止覆盖已有正确值）
+func (s *contentService) UpdateFileDuration(fileID uint, durationSeconds float64) error {
+	if durationSeconds <= 0 || !(durationSeconds < 1e6) {
+		return nil
+	}
+	file, err := s.fileRepo.GetByID(fileID)
+	if err != nil {
+		return fmt.Errorf("failed to get file: %w", err)
+	}
+	cur := 0.0
+	if file.Duration != nil && *file.Duration > 0 {
+		cur = *file.Duration
+	}
+	if cur > 0 {
+		return nil
+	}
+	file.Duration = &durationSeconds
 	return s.fileRepo.Update(file)
 }
 

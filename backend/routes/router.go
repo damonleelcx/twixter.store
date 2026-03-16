@@ -217,6 +217,11 @@ func setupContentRoutes(
 		middleware.OptionalAuthMiddleware(authService),
 		middleware.RequireNSFWPermissionForDarkContentByFileID(repos.ContentFileRepo, repos.ContentRepo, repos.UserPermissionRepo),
 		contentController.StreamTranscodedFile)
+	// 当 DB 无时长时，客户端用 video.duration 上报并写入 content_file（需登录且有权观看）
+	contentRoutes.PATCH("/files/:file_id/duration",
+		middleware.AuthMiddleware(authService),
+		middleware.RequireNSFWPermissionForDarkContentByFileID(repos.ContentFileRepo, repos.ContentRepo, repos.UserPermissionRepo),
+		contentController.UpdateFileDuration)
 	// 记录内容观看：可选登录；未登录时仅跳过记录，不返回 401（与 viewing cookie 访问一致）
 	contentRoutes.POST("/:id/view",
 		middleware.OptionalAuthMiddleware(authService),

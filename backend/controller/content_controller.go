@@ -730,6 +730,31 @@ func (cc *ContentController) RecordWatchProgress(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Watch progress recorded"})
 }
 
+// UpdateFileDurationRequest 更新文件时长请求体（客户端从 video.duration 上报，仅在 DB 无时长时写入）
+type UpdateFileDurationRequest struct {
+	DurationSeconds float64 `json:"duration_seconds" binding:"required,gt=0"`
+}
+
+// UpdateFileDuration 当 DB 未存储时长时，用客户端上报的 video.duration 更新 content_file（需登录且有权观看该内容）
+func (cc *ContentController) UpdateFileDuration(c *gin.Context) {
+	fileIDStr := c.Param("file_id")
+	fileID, err := strconv.ParseUint(fileIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file ID"})
+		return
+	}
+	var req UpdateFileDurationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+		return
+	}
+	if err := cc.contentService.UpdateFileDuration(uint(fileID), req.DurationSeconds); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Duration updated"})
+}
+
 // RecordContentView 记录内容观看
 // @Summary Record content view
 // @Description Record a view/play event for content
