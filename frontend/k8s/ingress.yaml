@@ -39,3 +39,30 @@ spec:
     - hosts:
         - www.twixter.store
       secretName: twixter-frontend-tls
+---
+# 根域 twixter.store 永久重定向到 https://www.twixter.store
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: twixter-apex-redirect
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/configuration-snippet: "return 308 https://www.twixter.store$request_uri;"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: twixter.store
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: twixter-frontend
+                port:
+                  number: 3000
+  tls:
+    - hosts:
+        - twixter.store
+      secretName: twixter-apex-tls

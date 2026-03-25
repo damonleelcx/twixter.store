@@ -195,10 +195,21 @@ func setupContentRoutes(
 		middleware.OptionalAuthMiddleware(authService),
 		middleware.RequireNSFWPermissionForDarkList(repos.UserPermissionRepo),
 		contentController.ListContent)
+	// Slideshow 视频列表（可选登录；但 category=dark 强制要求登录 + can_view_nsfw，由 controller 内校验，不接受 viewing cookie 旁路）
+	contentRoutes.GET("/slideshow",
+		middleware.OptionalAuthMiddleware(authService),
+		contentController.ListSlideshowVideos)
 	// GIF 预览：已购买返回原图，未购买返回后端模糊后的 JPEG（可选登录）
 	contentRoutes.GET("/files/:file_id/preview",
 		middleware.OptionalAuthMiddleware(authService),
 		contentController.StreamGifPreview)
+	// Slideshow 预览 HLS：匿名可观看 light 的“中间 60 秒”；dark 必须登录+can_view_nsfw（controller 内校验）
+	contentRoutes.GET("/files/:file_id/slideshow-preview",
+		middleware.OptionalAuthMiddleware(authService),
+		contentController.SlideshowPreviewPlaylist)
+	contentRoutes.GET("/files/:file_id/slideshow-segment",
+		middleware.OptionalAuthMiddleware(authService),
+		contentController.SlideshowPreviewSegment)
 	// 字面路径 /library、/bookmarks、/viewing-token 必须在 /:id 之前注册
 	contentRoutes.GET("/library", middleware.AuthMiddleware(authService), contentController.ListLibrary)
 	contentRoutes.GET("/bookmarks", middleware.AuthMiddleware(authService), contentController.ListBookmarks)
@@ -217,6 +228,11 @@ func setupContentRoutes(
 		middleware.OptionalAuthMiddleware(authService),
 		middleware.RequireNSFWPermissionForDarkContentByFileID(repos.ContentFileRepo, repos.ContentRepo, repos.UserPermissionRepo),
 		contentController.StreamTranscodedFile)
+	// 当 DB 无时长时，客户端用 video.duration 上报并写入 content_file（需登录且有权观看）
+	contentRoutes.PATCH("/files/:file_id/duration",
+		middleware.AuthMiddleware(authService),
+		middleware.RequireNSFWPermissionForDarkContentByFileID(repos.ContentFileRepo, repos.ContentRepo, repos.UserPermissionRepo),
+		contentController.UpdateFileDuration)
 	// 记录内容观看：可选登录；未登录时仅跳过记录，不返回 401（与 viewing cookie 访问一致）
 	contentRoutes.POST("/:id/view",
 		middleware.OptionalAuthMiddleware(authService),

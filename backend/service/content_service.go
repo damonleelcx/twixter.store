@@ -40,6 +40,8 @@ type ContentService interface {
 
 	// UpdateFileStage 更新文件处理阶段
 	UpdateFileStage(fileID uint, stage entity.FileProcessingStage) error
+	// UpdateFileDuration 在 DB 未记录时长时，用客户端上报的时长更新 content_file.duration（仅当当前为 nil 或 <=0 时写入）
+	UpdateFileDuration(fileID uint, durationSeconds float64) error
 
 	// GetTranscodedFile 获取转码文件信息
 	GetTranscodedFile(fileID uint) (*entity.ContentFile, error)
@@ -60,6 +62,8 @@ type ContentService interface {
 
 	// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
 	ListFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error)
+	// ListVideoFeed 按分类分页列出 feed 视频内容（仅 ready 且 type=video），用于 slideshow 等。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
+	ListVideoFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error)
 	// ListFeedByTag 按标签名列出 feed 内容（仅 ready）；freeOnly 为 true 时仅返回 price=0 的免费内容
 	ListFeedByTag(tagName string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error)
 	// ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部；freeOnly 为 true 时仅返回 price=0 的免费内容
@@ -477,6 +481,26 @@ func (s *contentService) UpdateFileStage(fileID uint, stage entity.FileProcessin
 	return s.fileRepo.Update(file)
 }
 
+// UpdateFileDuration 仅在 DB 中时长为空或 0 时，写入客户端上报的时长（防止覆盖已有正确值）
+func (s *contentService) UpdateFileDuration(fileID uint, durationSeconds float64) error {
+	if durationSeconds <= 0 || !(durationSeconds < 1e6) {
+		return nil
+	}
+	file, err := s.fileRepo.GetByID(fileID)
+	if err != nil {
+		return fmt.Errorf("failed to get file: %w", err)
+	}
+	cur := 0.0
+	if file.Duration != nil && *file.Duration > 0 {
+		cur = *file.Duration
+	}
+	if cur > 0 {
+		return nil
+	}
+	file.Duration = &durationSeconds
+	return s.fileRepo.Update(file)
+}
+
 // GetTranscodedFile 获取转码文件信息
 func (s *contentService) GetTranscodedFile(fileID uint) (*entity.ContentFile, error) {
 	file, err := s.fileRepo.GetByID(fileID)
@@ -708,6 +732,15 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 // ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买；freeOnly 为 true 时仅返回 price=0 的免费内容
 func (s *contentService) ListFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error) {
 	contents, err := s.contentRepo.ListFeedByCategory(category, limit, offset, sortBy, freeOnly)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildListFeedItems(contents, userID)
+}
+
+// ListVideoFeed 按分类分页列出 feed 视频内容（仅 ready 且 type=video）
+func (s *contentService) ListVideoFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error) {
+	contents, err := s.contentRepo.ListVideoFeedByCategory(category, limit, offset, sortBy, freeOnly)
 	if err != nil {
 		return nil, err
 	}

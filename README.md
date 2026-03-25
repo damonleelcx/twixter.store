@@ -19,7 +19,7 @@ Digital content platform with subscriptions, credits, and video processing.
 Kafka depends on Zookeeper. In a terminal, from your Kafka install directory:
 
 ```bash
-cd path\to\kafka
+cd path\to\kafka\bin\windows
 zookeeper-server-start.bat config\zookeeper.properties
 ```
 
@@ -1056,4 +1056,5 @@ kubectl logs deployment/twixter-backend
 
 若仍报错，把新的 `kubectl logs` 最后几行贴出来即可。
 
+Mail Log:
 `sudo tail -200 /var/log/maillog`

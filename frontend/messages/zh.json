@@ -6,6 +6,7 @@
   "nav": {
     "home": "首页",
     "explore": "探索",
+    "slideshow": "连播",
     "notifications": "通知",
     "messages": "私信",
     "chat": "NSFW聊天",
@@ -16,6 +17,26 @@
     "adminUpload": "管理员上传",
     "adminAnalytics": "数据分析",
     "subscribe": "订阅"
+  },
+  "slideshow": {
+    "title": "连播",
+    "light": "推荐",
+    "dark": "高端",
+    "back": "返回",
+    "freeSlideshow": "免费连播",
+    "soundOn": "开声音",
+    "soundOff": "静音",
+    "soundHint": "点击开启声音",
+    "durationBadge": "60秒",
+    "countdownSuffix": "秒",
+    "hintStartMiddle": "从中间开始",
+    "hintAutoNext": "自动切换到下一个",
+    "tapToPlayPause": "点击播放/暂停",
+    "loading": "加载中...",
+    "noMore": "没有更多了",
+    "loadFailed": "加载失败",
+    "retry": "重试",
+    "needNsfwPermission": "需要 正确 权限"
   },
   "chat": {
     "loading": "加载中...",
@@ -258,6 +279,8 @@
     "description": "全新的社交体验",
     "exploreTitle": "探索 | Twixter",
     "exploreDescription": "在 Twixter 发现与搜索内容",
+    "slideshowTitle": "连播 | Twixter",
+    "slideshowDescription": "以类似 TikTok 的方式连播观看：每条视频从中间开始播放 60 秒，自动切换到下一个。",
     "tagTitle": "标签「{tag}」的内容 | Twixter",
     "tagDescription": "在 Twixter 浏览带标签「{tag}」的内容",
     "subscribeTitle": "订阅 | Twixter",

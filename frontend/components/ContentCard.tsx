@@ -12,6 +12,7 @@ import {
   type ContentFeedItem
 } from "@/lib/api";
 import { ensureAbsoluteUrl } from "@/lib/metadata";
+import { getResolutionLabel } from "@/lib/resolution";
 import { buildShareUrl } from "@/lib/viewing";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -179,7 +180,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
                 </span>
               ) : (item.preview_width != null && item.preview_width > 0 && item.preview_height != null && item.preview_height > 0) ? (
                 <span className="text-[var(--muted)]">
-                  · {item.preview_width}×{item.preview_height}
+                  · {getResolutionLabel(item.preview_width, item.preview_height) ?? `${item.preview_width}×${item.preview_height}`}
                 </span>
               ) : null}
             </div>
@@ -300,6 +301,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
             <HlsPlayer
               fileId={item.first_file_id}
               contentId={item.id}
+              durationSeconds={item.duration != null && item.duration > 0 ? item.duration : undefined}
               className="block w-full h-auto object-contain"
               poster={effectivePreviewSrc ?? undefined}
               playLabel={tPost("playVideo")}
