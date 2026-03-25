@@ -279,6 +279,8 @@
     "description": "全新的社交体验",
     "exploreTitle": "探索 | Twixter",
     "exploreDescription": "在 Twixter 发现与搜索内容",
+    "slideshowTitle": "连播 | Twixter",
+    "slideshowDescription": "以类似 TikTok 的方式连播观看：每条视频从中间开始播放 60 秒，自动切换到下一个。",
     "tagTitle": "标签「{tag}」的内容 | Twixter",
     "tagDescription": "在 Twixter 浏览带标签「{tag}」的内容",
     "subscribeTitle": "订阅 | Twixter",

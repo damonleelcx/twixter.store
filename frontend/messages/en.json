@@ -279,6 +279,8 @@
     "description": "A fresh take on social",
     "exploreTitle": "Explore | Twixter",
     "exploreDescription": "Discover and search content on Twixter",
+    "slideshowTitle": "Slideshow | Twixter",
+    "slideshowDescription": "Watch a free 60-second preview from the middle of each video in a TikTok-style slideshow.",
     "tagTitle": "Posts tagged {tag} | Twixter",
     "tagDescription": "Browse content with tag {tag} on Twixter",
     "subscribeTitle": "Subscribe | Twixter",
