@@ -782,7 +782,7 @@ export async function fetchSlideshowFeed(
     category,
     cursor: String(cursor),
     limit: String(limit),
-    sort: sort === "free" ? "created_at" : String(sort),
+    sort,
   });
   // Unauthenticated dark list: backend allows cookie or ?viewing= (encrypted viewing_dark token)
   if (category === "dark") {
