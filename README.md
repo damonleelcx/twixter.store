@@ -19,7 +19,7 @@ Digital content platform with subscriptions, credits, and video processing.
 Kafka depends on Zookeeper. In a terminal, from your Kafka install directory:
 
 ```bash
-cd path\to\kafka
+cd path\to\kafka\bin\windows
 zookeeper-server-start.bat config\zookeeper.properties
 ```
 

@@ -6,6 +6,7 @@
   "nav": {
     "home": "Home",
     "explore": "Explore",
+    "slideshow": "Slideshow",
     "notifications": "Notifications",
     "messages": "Messages",
     "chat": "NSFW Chat",
@@ -16,6 +17,26 @@
     "adminUpload": "Admin Upload",
     "adminAnalytics": "Analytics",
     "subscribe": "Subscribe"
+  },
+  "slideshow": {
+    "title": "Slideshow",
+    "light": "For you",
+    "dark": "Premium",
+    "back": "Back",
+    "freeSlideshow": "Free slideshow",
+    "soundOn": "Sound on",
+    "soundOff": "Sound off",
+    "soundHint": "Tap to enable sound",
+    "durationBadge": "60s",
+    "countdownSuffix": "s",
+    "hintStartMiddle": "Starts from the middle",
+    "hintAutoNext": "Auto slides to next",
+    "tapToPlayPause": "Tap to play/pause",
+    "loading": "Loading...",
+    "noMore": "No more videos",
+    "loadFailed": "Load failed",
+    "retry": "Retry",
+    "needNsfwPermission": "Requires correct permission"
   },
   "chat": {
     "loading": "Loading...",

@@ -17,6 +17,7 @@ export function ComposeBox({ sort, onSortChange }: ComposeBoxProps) {
   const locale = (params?.locale as string) || "en";
   const tFeed = useTranslations("feed");
   const tAuth = useTranslations("auth");
+  const tSlide = useTranslations("slideshow");
   const [user, setUser] = useState<Awaited<ReturnType<typeof fetchCurrentUser>>>(null);
 
   useEffect(() => {
@@ -72,25 +73,31 @@ export function ComposeBox({ sort, onSortChange }: ComposeBoxProps) {
           </button>
         </div>
       </div>
-      {isLoggedIn ? (
-        canUpload ? (
-          <Link
-            href={`/${locale}/admin/upload`}
-            className="rounded-full bg-[var(--accent)] px-5 py-2 font-bold text-[var(--accent-foreground)] hover:opacity-90 shrink-0 ml-auto"
-          >
-            {tFeed("post")}
-          </Link>
-        ) : (
-          <></>
-        )
-      ) : (
+      <div className="ml-auto flex items-center gap-2 shrink-0">
         <Link
-          href={`/${locale}/auth/signin`}
-          className="rounded-full bg-[var(--accent)] px-5 py-2 font-bold text-[var(--accent-foreground)] hover:opacity-90 shrink-0 ml-auto"
+          href={`/${locale}/slideshow`}
+          className="rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--hover)]"
         >
-          {tAuth("signIn")}
+          {tSlide("freeSlideshow")}
         </Link>
-      )}
+        {isLoggedIn ? (
+          canUpload ? (
+            <Link
+              href={`/${locale}/admin/upload`}
+              className="rounded-full bg-[var(--accent)] px-5 py-2 font-bold text-[var(--accent-foreground)] hover:opacity-90"
+            >
+              {tFeed("post")}
+            </Link>
+          ) : null
+        ) : (
+          <Link
+            href={`/${locale}/auth/signin`}
+            className="rounded-full bg-[var(--accent)] px-5 py-2 font-bold text-[var(--accent-foreground)] hover:opacity-90"
+          >
+            {tAuth("signIn")}
+          </Link>
+        )}
+      </div>
     </div>
   );
 

@@ -714,6 +714,9 @@ export type ContentFeedResponse = {
   has_more: boolean;
 };
 
+/** Slideshow list response (video-only). Same shape as ContentFeedResponse. */
+export type SlideshowFeedResponse = ContentFeedResponse;
+
 /** Sort option for feed list: by upload date, view count, or free content only (0 credits). */
 export type FeedSort = "created_at" | "view_count" | "free";
 
@@ -759,6 +762,48 @@ export async function fetchContentFeed(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error || data?.details || res.statusText || "Failed to load feed");
+  }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    next_cursor: typeof data?.next_cursor === "number" ? data.next_cursor : cursor + 1,
+    has_more: Boolean(data?.has_more),
+  };
+}
+
+/** Fetch slideshow videos (video-only). Dark requires can_view_nsfw and sign-in (backend enforces). */
+export async function fetchSlideshowFeed(
+  category: "light" | "dark",
+  cursor: number,
+  limit = 10,
+  sort: Exclude<FeedSort, "free"> | "created_at" | "view_count" = "created_at"
+): Promise<SlideshowFeedResponse> {
+  const base = getApiBase();
+  const params = new URLSearchParams({
+    category,
+    cursor: String(cursor),
+    limit: String(limit),
+    sort: sort === "free" ? "created_at" : String(sort),
+  });
+  // Unauthenticated dark list: backend allows cookie or ?viewing= (encrypted viewing_dark token)
+  if (category === "dark") {
+    const viewing =
+      getViewingCookie() ||
+      (typeof window !== "undefined"
+        ? getViewingFromSearchParams(new URLSearchParams(window.location.search))
+        : null);
+    if (viewing) params.set("viewing", viewing);
+  }
+  const headers: HeadersInit = {};
+  const token = getAccessToken();
+  if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+  const res = await fetchWithTimeout(
+    `${base}/content/slideshow?${params}`,
+    { headers, cache: "no-store", credentials: "include" },
+    15_000
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || data?.details || res.statusText || "Failed to load slideshow");
   }
   return {
     items: Array.isArray(data?.items) ? data.items : [],

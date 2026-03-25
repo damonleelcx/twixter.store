@@ -88,6 +88,8 @@ function LeftSidebarContent({ locale }: LeftSidebarProps) {
                 ? `/${locale}`
                 : item.key === "explore"
                   ? `/${locale}/explore`
+                  : item.key === "slideshow"
+                    ? `/${locale}/slideshow`
                   : item.key === "chat"
                     ? `/${locale}/chat`
                     : item.key === "adminUpload"

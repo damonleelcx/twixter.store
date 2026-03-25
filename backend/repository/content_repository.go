@@ -23,6 +23,8 @@ type ContentRepository interface {
 	GetByCategory(category string, limit, offset int) ([]entity.Content, error)
 	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
 	ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
+	// ListVideoFeedByCategory 按分类列出 feed 用视频内容（仅 type=video 且 status=ready）。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
+	ListVideoFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
 	Search(keyword string, limit, offset int) ([]entity.Content, error)
 	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
 	SearchReady(keyword string, category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
@@ -147,6 +149,20 @@ func orderByClause(sortBy string) string {
 func (r *contentRepository) ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("category = ? AND status = ?", category, entity.ContentStatusReady)
+	if freeOnly {
+		query = query.Where("price = ?", 0)
+	}
+	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy))
+	if err := query.Find(&contents).Error; err != nil {
+		return nil, err
+	}
+	return contents, nil
+}
+
+// ListVideoFeedByCategory 按分类列出 feed 用视频内容（仅 type=video 且 status=ready）；freeOnly 为 true 时仅返回 price=0 的免费内容
+func (r *contentRepository) ListVideoFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
+	var contents []entity.Content
+	query := r.db.Where("category = ? AND status = ? AND type = ?", category, entity.ContentStatusReady, entity.ContentTypeVideo)
 	if freeOnly {
 		query = query.Where("price = ?", 0)
 	}

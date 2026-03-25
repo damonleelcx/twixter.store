@@ -62,6 +62,8 @@ type ContentService interface {
 
 	// ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
 	ListFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error)
+	// ListVideoFeed 按分类分页列出 feed 视频内容（仅 ready 且 type=video），用于 slideshow 等。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
+	ListVideoFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error)
 	// ListFeedByTag 按标签名列出 feed 内容（仅 ready）；freeOnly 为 true 时仅返回 price=0 的免费内容
 	ListFeedByTag(tagName string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error)
 	// ListFeedSearch 模糊搜索 name/description 列出 feed（仅 ready），category 为空时搜全部；freeOnly 为 true 时仅返回 price=0 的免费内容
@@ -730,6 +732,15 @@ func (s *contentService) buildListFeedItems(contents []entity.Content, userID ui
 // ListFeed 按分类分页列出 feed 内容（仅 ready），含首文件 gif 与当前用户是否已购买；freeOnly 为 true 时仅返回 price=0 的免费内容
 func (s *contentService) ListFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error) {
 	contents, err := s.contentRepo.ListFeedByCategory(category, limit, offset, sortBy, freeOnly)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildListFeedItems(contents, userID)
+}
+
+// ListVideoFeed 按分类分页列出 feed 视频内容（仅 ready 且 type=video）
+func (s *contentService) ListVideoFeed(category string, userID uint, limit, offset int, sortBy string, freeOnly bool) ([]ListFeedItem, error) {
+	contents, err := s.contentRepo.ListVideoFeedByCategory(category, limit, offset, sortBy, freeOnly)
 	if err != nil {
 		return nil, err
 	}

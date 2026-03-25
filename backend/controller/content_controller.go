@@ -3,13 +3,17 @@ package controller
 import (
 	"backend/entity"
 	"backend/middleware"
+	"backend/previewtoken"
 	"backend/repository"
 	"backend/service"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	urlpkg "net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -445,6 +449,398 @@ func (cc *ContentController) ListContent(c *gin.Context) {
 		"next_cursor": nextCursor,
 		"has_more":    hasMore,
 	})
+}
+
+// ListSlideshowVideos 返回用于 slideshow 的视频列表（仅 ready + type=video）。
+// category=dark 时：必须登录且拥有 can_view_nsfw（不接受 viewing cookie/param 旁路）。
+func (cc *ContentController) ListSlideshowVideos(c *gin.Context) {
+	category := c.DefaultQuery("category", "light")
+	if category != "light" && category != "dark" {
+		category = "light"
+	}
+	cursor, _ := strconv.Atoi(c.DefaultQuery("cursor", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if limit <= 0 || limit > 30 {
+		limit = 10
+	}
+	sortBy := strings.TrimSpace(c.DefaultQuery("sort", "created_at"))
+	if sortBy != "view_count" && sortBy != "created_at" {
+		sortBy = "created_at"
+	}
+	offset := cursor * limit
+
+	userID := uint(0)
+	var user *entity.UserBase
+	if u, exists := middleware.GetUserFromContext(c); exists {
+		user = u
+		userID = u.ID
+	}
+
+	if category == "dark" {
+		// dark：允许两种方式
+		// 1) 已登录且拥有 can_view_nsfw
+		// 2) 未登录但 cookie twixter_viewing 解码为 viewing_dark，或 query ?viewing= 解码为 viewing_dark
+		if user != nil {
+			hasNSFW, errPerm := cc.userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
+			if errPerm != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permission"})
+				return
+			}
+			if !hasNSFW {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
+				return
+			}
+		} else if middleware.ViewingCookieFromRequest(c) != "viewing_dark" && middleware.DecodeViewingParam(c.Query("viewing")) != "viewing_dark" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+	}
+
+	items, err := cc.contentService.ListVideoFeed(category, userID, limit, offset, sortBy, false)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list content", "details": err.Error()})
+		return
+	}
+	nextCursor := cursor + 1
+	hasMore := len(items) == limit
+	c.Header("Cache-Control", "private, no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"items":       items,
+		"next_cursor": nextCursor,
+		"has_more":    hasMore,
+	})
+}
+
+type parsedM3U8 struct {
+	headerLines []string
+	segments    []m3u8Seg
+}
+
+type m3u8Seg struct {
+	duration float64
+	uri      string
+}
+
+// normalizeSegmentURI converts playlist URIs into a safe relative segment name.
+// - strips query string
+// - if URI looks like /stream?segment=..., extracts segment param
+// - if absolute URL, keeps only the path (relative to playlist dir)
+// - trims leading "./" and leading "/"
+func normalizeSegmentURI(uri string) string {
+	uri = strings.TrimSpace(uri)
+	if uri == "" {
+		return ""
+	}
+	// If it's a URL (absolute or relative) that includes segment=, extract it.
+	if strings.Contains(uri, "segment=") {
+		// net/url can't parse bare relative paths with query reliably without a base.
+		raw := uri
+		if strings.HasPrefix(raw, "/") {
+			raw = "http://local" + raw
+		} else if !strings.Contains(raw, "://") && strings.Contains(raw, "?") {
+			raw = "http://local/" + raw
+		}
+		if u, err := urlpkg.Parse(raw); err == nil && u != nil {
+			seg := strings.TrimSpace(u.Query().Get("segment"))
+			if seg != "" {
+				return normalizeSegmentURI(seg)
+			}
+			// if no segment param, fall through to path handling below
+			if strings.Contains(uri, "://") {
+				uri = u.Path
+			}
+		}
+	}
+
+	// Absolute URL → keep path portion
+	if strings.Contains(uri, "://") {
+		if u, err := urlpkg.Parse(uri); err == nil && u != nil {
+			uri = u.Path
+		}
+	}
+
+	// Strip query for remaining cases
+	if idx := strings.Index(uri, "?"); idx != -1 {
+		uri = uri[:idx]
+	}
+	uri = strings.TrimSpace(uri)
+	if uri == "" {
+		return ""
+	}
+	uri = strings.TrimPrefix(uri, "./")
+	uri = strings.TrimPrefix(uri, "/")
+	return uri
+}
+
+func parseM3U8(r io.Reader) (parsedM3U8, error) {
+	var out parsedM3U8
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return out, err
+	}
+	lines := strings.Split(string(b), "\n")
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#EXTINF:") {
+			// next non-empty non-comment line is URI
+			dPart := strings.TrimPrefix(line, "#EXTINF:")
+			if idx := strings.Index(dPart, ","); idx != -1 {
+				dPart = dPart[:idx]
+			}
+			d, _ := strconv.ParseFloat(strings.TrimSpace(dPart), 64)
+			out.segments = append(out.segments, m3u8Seg{duration: d})
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			// keep header-ish lines, drop old ENDLIST
+			if line == "#EXT-X-ENDLIST" {
+				continue
+			}
+			out.headerLines = append(out.headerLines, line)
+			continue
+		}
+		// URI
+		if len(out.segments) == 0 {
+			// not expected, but keep as header
+			out.headerLines = append(out.headerLines, line)
+			continue
+		}
+		out.segments[len(out.segments)-1].uri = line
+	}
+	// filter empty uris
+	segs := make([]m3u8Seg, 0, len(out.segments))
+	for _, s := range out.segments {
+		if s.uri != "" {
+			segs = append(segs, s)
+		}
+	}
+	out.segments = segs
+	if len(out.segments) == 0 {
+		return out, errors.New("no segments in playlist")
+	}
+	return out, nil
+}
+
+// SlideshowPreviewPlaylist 返回只包含“从中间开始 60 秒”的 HLS 播放列表（匿名可访问 light）。
+// dark 内容：必须登录且拥有 can_view_nsfw（不接受 viewing cookie/param 旁路）。
+func (cc *ContentController) SlideshowPreviewPlaylist(c *gin.Context) {
+	fileIDStr := c.Param("file_id")
+	fileID64, err := strconv.ParseUint(fileIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file ID"})
+		return
+	}
+	fileID := uint(fileID64)
+
+	file, err := cc.contentService.GetTranscodedFile(fileID)
+	if err != nil || file == nil || file.TranscodedFilePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Transcoded file not found"})
+		return
+	}
+	content, err := cc.contentService.GetContent(file.ContentID)
+	if err != nil || content == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Content not found"})
+		return
+	}
+	if content.IsDark() {
+		// dark：允许两种方式
+		// 1) 已登录且拥有 can_view_nsfw
+		// 2) 未登录但 cookie twixter_viewing 解码为 viewing_dark，或 query ?viewing= 解码为 viewing_dark
+		user, exists := middleware.GetUserFromContext(c)
+		if exists && user != nil {
+			has, errPerm := cc.userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
+			if errPerm != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permission"})
+				return
+			}
+			if !has {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
+				return
+			}
+		} else if middleware.ViewingCookieFromRequest(c) != "viewing_dark" && middleware.DecodeViewingParam(c.Query("viewing")) != "viewing_dark" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+	}
+
+	reader, _, err := cc.contentService.StreamFileFromS3(file.TranscodedFilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to stream playlist file"})
+		return
+	}
+	defer reader.Close()
+	pl, err := parseM3U8(reader)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid playlist"})
+		return
+	}
+
+	total := 0.0
+	for _, s := range pl.segments {
+		if s.duration > 0 {
+			total += s.duration
+		}
+	}
+	if total <= 0 {
+		total = 120 // fallback
+	}
+	start := total / 2
+	end := start + 60
+	if end > total {
+		end = total
+	}
+
+	acc := 0.0
+	startIdx := 0
+	for i, s := range pl.segments {
+		accNext := acc + s.duration
+		if accNext >= start {
+			startIdx = i
+			break
+		}
+		acc = accNext
+	}
+	acc = 0.0
+	endIdx := len(pl.segments) - 1
+	for i, s := range pl.segments {
+		acc += s.duration
+		if acc >= end {
+			endIdx = i
+			break
+		}
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx < startIdx {
+		endIdx = startIdx
+	}
+	// include contiguous segments only
+	selected := make([]string, 0, endIdx-startIdx+1)
+	for i := startIdx; i <= endIdx && i < len(pl.segments); i++ {
+		selected = append(selected, normalizeSegmentURI(pl.segments[i].uri))
+	}
+	// drop empties after normalization
+	selectedNorm := make([]string, 0, len(selected))
+	for _, s := range selected {
+		if s != "" {
+			selectedNorm = append(selectedNorm, s)
+		}
+	}
+	selected = selectedNorm
+	if len(selected) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid playlist"})
+		return
+	}
+	exp := time.Now().Add(5 * time.Minute).Unix()
+	tok, errTok := previewtoken.Encrypt(previewtoken.Payload{
+		FileID:        fileID,
+		ExpiresAtUnix: exp,
+		Segments:      selected,
+	})
+	if errTok != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Preview token not available"})
+		return
+	}
+
+	// Rewrite playlist to point segment URIs to our guarded endpoint
+	var b strings.Builder
+	for _, h := range pl.headerLines {
+		b.WriteString(h)
+		b.WriteString("\n")
+	}
+	// Ensure VOD endlist
+	b.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
+	for i, uri := range selected {
+		dur := pl.segments[startIdx+i].duration
+		if dur <= 0 {
+			dur = 2
+		}
+		b.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", dur))
+		// segment endpoint uses index within selected list
+		b.WriteString(fmt.Sprintf("/api/content/files/%d/slideshow-segment?i=%d&t=%s\n", fileID, i, tok))
+		_ = uri // uri kept inside token only
+	}
+	b.WriteString("#EXT-X-ENDLIST\n")
+
+	c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	c.Header("Cache-Control", "private, no-store")
+	c.String(http.StatusOK, b.String())
+}
+
+// SlideshowPreviewSegment 返回预览片段的单个 .ts segment（受 token 保护，且只允许播放列表中那 60 秒的片段）。
+func (cc *ContentController) SlideshowPreviewSegment(c *gin.Context) {
+	fileIDStr := c.Param("file_id")
+	fileID64, err := strconv.ParseUint(fileIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file ID"})
+		return
+	}
+	fileID := uint(fileID64)
+	idx, _ := strconv.Atoi(c.DefaultQuery("i", "-1"))
+	token := c.Query("t")
+	if idx < 0 || token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	p, err := previewtoken.Decrypt(token)
+	if err != nil || p.FileID != fileID {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if idx >= len(p.Segments) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Segment not found"})
+		return
+	}
+
+	file, err := cc.contentService.GetTranscodedFile(fileID)
+	if err != nil || file == nil || file.TranscodedFilePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Transcoded file not found"})
+		return
+	}
+	content, err := cc.contentService.GetContent(file.ContentID)
+	if err != nil || content == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Content not found"})
+		return
+	}
+	if content.IsDark() {
+		user, exists := middleware.GetUserFromContext(c)
+		if exists && user != nil {
+			has, errPerm := cc.userPermissionRepo.HasPermission(user.ID, "can_view_nsfw")
+			if errPerm != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check permission"})
+				return
+			}
+			if !has {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
+				return
+			}
+		} else if middleware.ViewingCookieFromRequest(c) != "viewing_dark" && middleware.DecodeViewingParam(c.Query("viewing")) != "viewing_dark" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+	}
+
+	segName := normalizeSegmentURI(p.Segments[idx])
+	if segName == "" || strings.Contains(segName, "..") {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Segment not found"})
+		return
+	}
+	dir := path.Dir(file.TranscodedFilePath)
+	segKey := path.Join(dir, segName)
+
+	reader, _, err := cc.contentService.StreamFileFromS3(segKey)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Segment file not found"})
+		return
+	}
+	defer reader.Close()
+	c.Header("Content-Type", "video/mp2t")
+	c.Header("Cache-Control", "private, max-age=300")
+	c.DataFromReader(http.StatusOK, -1, "video/mp2t", reader, nil)
 }
 
 // ListLibrary 获取当前用户已购买的内容列表（Library 页）
