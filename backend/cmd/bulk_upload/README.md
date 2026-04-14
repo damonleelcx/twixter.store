@@ -45,7 +45,7 @@ go run ./cmd/bulk_upload -folder=./videos -workers=4
 
 ```cmd
 cd backend
-go run .\cmd\bulk_upload -folder=.\videos
+go run .\cmd\bulk_upload -folder=.\videos -local
 ```
 
 或先编译再运行：

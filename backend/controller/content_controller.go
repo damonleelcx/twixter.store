@@ -624,7 +624,7 @@ func parseM3U8(r io.Reader) (parsedM3U8, error) {
 	return out, nil
 }
 
-// SlideshowPreviewPlaylist 返回只包含“从中间开始 60 秒”的 HLS 播放列表（匿名可访问 light）。
+// SlideshowPreviewPlaylist 返回约 60 秒的 HLS 预览播放列表：总长不足 60s 或从中点起剩余不足 60s 时从头截取，否则从中间截取 60s。
 // dark 内容：必须登录且拥有 can_view_nsfw（不接受 viewing cookie/param 旁路）。
 func (cc *ContentController) SlideshowPreviewPlaylist(c *gin.Context) {
 	fileIDStr := c.Param("file_id")
@@ -678,6 +678,7 @@ func (cc *ContentController) SlideshowPreviewPlaylist(c *gin.Context) {
 		return
 	}
 
+	const previewSeconds = 60.0
 	total := 0.0
 	for _, s := range pl.segments {
 		if s.duration > 0 {
@@ -687,10 +688,27 @@ func (cc *ContentController) SlideshowPreviewPlaylist(c *gin.Context) {
 	if total <= 0 {
 		total = 120 // fallback
 	}
-	start := total / 2
-	end := start + 60
-	if end > total {
-		end = total
+	midStart := total / 2
+	remainingFromMid := total - midStart
+
+	var start, end float64
+	switch {
+	case total < previewSeconds:
+		// 全长不足 60s：从头播完整段
+		start, end = 0, total
+	case remainingFromMid < previewSeconds:
+		// 从中点起剩余不足 60s：从头播，最多 60s
+		start = 0
+		end = previewSeconds
+		if end > total {
+			end = total
+		}
+	default:
+		start = midStart
+		end = start + previewSeconds
+		if end > total {
+			end = total
+		}
 	}
 
 	acc := 0.0

@@ -9,6 +9,7 @@ import (
 	"backend/repository"
 	"backend/service"
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,7 +27,7 @@ import (
 
 const (
 	adminUserID     = 1
-	priceCredits    = 12.99
+	priceCredits    = 0
 	categoryDark    = "dark"
 	maxTagsFromName = 5
 
@@ -109,6 +110,7 @@ func main() {
 		contentTagRepo: repos.ContentTagRepo,
 		s3Service:      s3Svc,
 		kafkaService:   kafkaSvc,
+		ninjaChat:      service.NewNinjaChatClient(),
 	}
 
 	// 先清理之前遗留的 processing/pending 内容（多半是失败未完成的），再处理新上传
@@ -150,6 +152,7 @@ type bulkUploader struct {
 	contentTagRepo repository.ContentTagRepository
 	s3Service      service.S3Service
 	kafkaService   service.KafkaService
+	ninjaChat      *service.NinjaChatClient
 }
 
 const (
@@ -525,7 +528,8 @@ func translateToEnglish(text string) string {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		logError("翻译请求失败 (%s): %v", text, err)
+		// 可选依赖未启动时不刷屏红色错误
+		log.Printf("LibreTranslate 不可用，跳过翻译: %v", err)
 		return text
 	}
 	defer resp.Body.Close()
@@ -543,6 +547,132 @@ func translateToEnglish(text string) string {
 		return out.TranslatedText
 	}
 	return text
+}
+
+const maxContentNameRunes = 255
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}
+
+// stripLLMJSONFence 去掉模型可能返回的 ```json ... ``` 包裹。
+func stripLLMJSONFence(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(strings.ToLower(s), "json") {
+		s = strings.TrimSpace(s[4:])
+	}
+	if i := strings.Index(s, "```"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// extractJSONObject 从文本中截取第一个花括号平衡的 JSON 对象（尊重字符串内的引号与转义），用于模型在 JSON 前后加了说明的情况。
+func extractJSONObject(s string) (string, bool) {
+	idx := strings.Index(s, "{")
+	if idx < 0 {
+		return "", false
+	}
+	depth := 0
+	inString := false
+	escape := false
+	for i := idx; i < len(s); i++ {
+		c := s[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if inString {
+			if c == '\\' {
+				escape = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[idx : i+1], true
+			}
+		}
+	}
+	return "", false
+}
+
+func parseNinjaTitleDescriptionJSON(raw string) (title, description string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", fmt.Errorf("empty ninjachat message")
+	}
+	raw = stripLLMJSONFence(raw)
+	var candidates []string
+	candidates = append(candidates, raw)
+	if obj, ok := extractJSONObject(raw); ok {
+		candidates = append(candidates, obj)
+	}
+	var out struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	for _, c := range candidates {
+		if err := json.Unmarshal([]byte(c), &out); err != nil {
+			continue
+		}
+		t := strings.TrimSpace(out.Title)
+		if t == "" {
+			continue
+		}
+		return truncateRunes(t, maxContentNameRunes), strings.TrimSpace(out.Description), nil
+	}
+	return "", "", fmt.Errorf("parse ninja json: invalid or truncated response")
+}
+
+// ninjaEroticTitleAndDescription 用 NinjaChat 根据文件名提示生成英文标题与成人向描述；失败时返回空串与错误，由调用方回退。
+func ninjaEroticTitleAndDescription(ctx context.Context, client *service.NinjaChatClient, baseName, parsedName string) (title, description string, err error) {
+	if client == nil {
+		return "", "", fmt.Errorf("ninjachat not configured")
+	}
+	stem := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+	stem = strings.TrimSpace(stem)
+	prompt := fmt.Sprintf(`Adult erotic video catalog (18+ only). Filename stem: %q. Parsed guess: %q.
+
+Return ONLY valid JSON, one line if possible, no markdown:
+{"title":"English title under 90 chars","description":"Max 2 short sensual sentences in English; adults-only; no minors or illegal themes."}`, stem, parsedName)
+	const maxTok = 1024
+	raw, err := client.Chat(ctx, prompt, maxTok)
+	if err != nil {
+		return "", "", err
+	}
+	title, description, err = parseNinjaTitleDescriptionJSON(raw)
+	if err != nil {
+		// 常见原因：max_tokens 截断；用更短指令重试一次
+		retryPrompt := fmt.Sprintf(`JSON only: {"title":"erotic English title from %q","description":"one teaser sentence"}`,
+			truncateRunes(stem, 120))
+		raw2, err2 := client.Chat(ctx, retryPrompt, 512)
+		if err2 != nil {
+			return "", "", err
+		}
+		return parseNinjaTitleDescriptionJSON(raw2)
+	}
+	return title, description, nil
 }
 
 // nameForDescription 将名称用 LibreTranslate 从中文译为英文后返回，用于 Description。
@@ -598,9 +728,24 @@ func (u *bulkUploader) uploadOne(localPath, baseName, ext string, localMode, sho
 	name, tagNames := parseNameAndTags(baseName)
 	contentType := videoExts[ext]
 
+	desc := fmt.Sprintf("Uploaded from %s", nameForDescription(baseName))
+	if u.ninjaChat != nil {
+		llmCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		llmTitle, llmDesc, llmErr := ninjaEroticTitleAndDescription(llmCtx, u.ninjaChat, baseName, name)
+		cancel()
+		if llmErr != nil {
+			logError("NinjaChat 生成标题/描述失败 (%s): %v", baseName, llmErr)
+		} else {
+			name = llmTitle
+			if strings.TrimSpace(llmDesc) != "" {
+				desc = llmDesc
+			}
+		}
+	}
+
 	content := &entity.Content{
 		Name:        name,
-		Description: fmt.Sprintf("Uploaded from %s", nameForDescription(baseName)),
+		Description: desc,
 		Type:        entity.ContentTypeVideo,
 		Status:      entity.ContentStatusPending,
 		UploadedBy:  adminUserID,
