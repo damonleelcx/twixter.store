@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -71,16 +72,114 @@ type ninjaChatResponse struct {
 	Metadata interface{} `json:"metadata,omitempty"`
 }
 
-// StreamCompletion 将 prompt 作为单条 user 消息调用 NinjaChat /chat（非流式），通过 onChunk 一次性推送全文；返回完整 assistant 文本。
-func (c *NinjaChatClient) StreamCompletion(ctx context.Context, prompt string, onChunk func(text string)) (full string, err error) {
+// ninjaAssistantTextFromJSON 从 Ninja /chat 或兼容形态中取出助手正文（message.content 可能为 string 或块数组；部分网关返回 choices[].message）。
+func ninjaAssistantTextFromJSON(b []byte) (string, bool) {
+	var root map[string]interface{}
+	if err := json.Unmarshal(b, &root); err != nil {
+		return "", false
+	}
+	if s, ok := stringFromMessageContent(root["message"]); ok {
+		return s, true
+	}
+	if choices, ok := root["choices"].([]interface{}); ok && len(choices) > 0 {
+		if ch0, ok := choices[0].(map[string]interface{}); ok {
+			if msg, ok := ch0["message"].(map[string]interface{}); ok {
+				if s, ok := stringFromMessageContent(msg); ok {
+					return s, true
+				}
+			}
+			if s, ok := ch0["text"].(string); ok && strings.TrimSpace(s) != "" {
+				return s, true
+			}
+		}
+	}
+	if s, ok := root["text"].(string); ok && strings.TrimSpace(s) != "" {
+		return s, true
+	}
+	if s, ok := root["response"].(string); ok && strings.TrimSpace(s) != "" {
+		return s, true
+	}
+	return "", false
+}
+
+// stringFromMessageContent 解析 message 对象里的 content（string 或多段 {type,text}）。
+func stringFromMessageContent(msg interface{}) (string, bool) {
+	m, ok := msg.(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	raw, ok := m["content"]
+	if !ok || raw == nil {
+		return "", false
+	}
+	switch v := raw.(type) {
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return "", false
+		}
+		return s, true
+	case []interface{}:
+		var parts []string
+		for _, item := range v {
+			part, ok := contentPartToString(item)
+			if ok && part != "" {
+				parts = append(parts, part)
+			}
+		}
+		out := strings.TrimSpace(strings.Join(parts, ""))
+		if out == "" {
+			return "", false
+		}
+		return out, true
+	default:
+		return "", false
+	}
+}
+
+func contentPartToString(item interface{}) (string, bool) {
+	switch v := item.(type) {
+	case string:
+		return v, true
+	case map[string]interface{}:
+		if t, ok := v["text"].(string); ok {
+			return t, true
+		}
+		if t, ok := v["content"].(string); ok {
+			return t, true
+		}
+	}
+	return "", false
+}
+
+func ninjaResponseTopKeys(root map[string]interface{}, max int) string {
+	if len(root) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(root))
+	for k := range root {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > max {
+		keys = keys[:max]
+	}
+	return strings.Join(keys, ",")
+}
+
+// complete 调用 NinjaChat /chat（非流式），返回助手全文。
+func (c *NinjaChatClient) complete(ctx context.Context, prompt string, temperature float64, maxTokens int) (string, error) {
 	if c == nil {
 		return "", fmt.Errorf("ninjachat client not configured")
+	}
+	if maxTokens <= 0 {
+		maxTokens = 150
 	}
 	body := ninjaChatRequest{
 		Messages:    []ninjaChatMessage{{Role: "user", Content: prompt}},
 		Model:       c.model,
-		Temperature: 0.85,
-		MaxTokens:   150,
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
 	}
 	jb, err := json.Marshal(body)
 	if err != nil {
@@ -108,15 +207,42 @@ func (c *NinjaChatClient) StreamCompletion(ctx context.Context, prompt string, o
 		return "", fmt.Errorf("ninjachat read body: %w", err)
 	}
 	var parsed ninjaChatResponse
-	if err := json.Unmarshal(b, &parsed); err != nil {
-		return "", fmt.Errorf("ninjachat parse response: %w", err)
-	}
-	full = strings.TrimSpace(parsed.Message.Content)
+	_ = json.Unmarshal(b, &parsed)
+
+	full := strings.TrimSpace(parsed.Message.Content)
 	if full == "" {
-		return "", nil
+		if alt, ok := ninjaAssistantTextFromJSON(b); ok {
+			full = strings.TrimSpace(alt)
+		}
 	}
-	full = stripRoleLabels(full)
-	if onChunk != nil {
+	if full == "" {
+		var root map[string]interface{}
+		_ = json.Unmarshal(b, &root)
+		hint := ""
+		if root != nil {
+			hint = fmt.Sprintf(" (top-level keys: %s)", ninjaResponseTopKeys(root, 12))
+		}
+		snippet := string(b)
+		if len(snippet) > 280 {
+			snippet = snippet[:280] + "…"
+		}
+		return "", fmt.Errorf("ninjachat empty assistant message%s; body≈ %q", hint, snippet)
+	}
+	return stripRoleLabels(full), nil
+}
+
+// Chat 单次补全，可指定 max_tokens（需比默认 Stream 更长输出时使用）。
+func (c *NinjaChatClient) Chat(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	return c.complete(ctx, prompt, 0.75, maxTokens)
+}
+
+// StreamCompletion 将 prompt 作为单条 user 消息调用 NinjaChat /chat（非流式），通过 onChunk 一次性推送全文；返回完整 assistant 文本。
+func (c *NinjaChatClient) StreamCompletion(ctx context.Context, prompt string, onChunk func(text string)) (full string, err error) {
+	full, err = c.complete(ctx, prompt, 0.85, 150)
+	if err != nil {
+		return "", err
+	}
+	if onChunk != nil && full != "" {
 		onChunk(full)
 	}
 	return full, nil

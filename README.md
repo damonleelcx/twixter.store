@@ -30,7 +30,7 @@ Use your actual Kafka path (e.g. `C:\Users\damon\kafka`) in place of `path\to\ka
 In a **second** terminal, from the same Kafka directory:
 
 ```bash
-cd path\to\kafka
+cd path\to\kafka\bin\windows
 kafka-server-start.bat config\server.properties
 ```
 
