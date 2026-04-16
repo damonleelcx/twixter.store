@@ -86,11 +86,15 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
     });
   }, []);
 
+  /** 标价为 0 的内容无需走购买接口，与已购买同样直接可播 */
+  const isFreeContent = item.price <= 0;
+  const canViewFullMedia = item.purchased || isFreeContent;
+
   const handlePurchase = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!getAccessToken() || item.purchased || purchasing) return;
+      if (!getAccessToken() || item.purchased || item.price <= 0 || purchasing) return;
       setPurchasing(true);
       try {
         await purchaseContent(item.id);
@@ -297,7 +301,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
               : { minHeight: 200 }
           }
         >
-          {item.purchased && item.first_file_id ? (
+          {canViewFullMedia && item.first_file_id ? (
             <HlsPlayer
               fileId={item.first_file_id}
               contentId={item.id}
@@ -328,7 +332,7 @@ export function ContentCard({ item, locale, onPurchased, onBookmarkedChange, onD
             </div>
           )}
 
-          {!item.purchased && (
+          {!canViewFullMedia && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] text-left">
               <span className="text-white font-semibold text-base drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] [text-shadow:0_0_12px_rgba(0,0,0,0.9),0_1px_3px_rgba(0,0,0,1)]">
                 {hasAuth ? tFeed("unlockToView") : tPost("signUpToView")}

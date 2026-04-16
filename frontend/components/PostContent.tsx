@@ -162,7 +162,7 @@ export function PostContent({ contentId, initialData }: PostContentProps) {
 
   const { content, files } = data;
   const firstFile = files[0];
-  const purchased = content.purchased || justPurchased;
+  const purchased = content.purchased || justPurchased || content.price <= 0;
   const displayName = content.author_username || content.name;
   const avatarInitial = (displayName.charAt(0) || "?").toUpperCase();
 

@@ -717,13 +717,46 @@ export type ContentFeedResponse = {
 /** Slideshow list response (video-only). Same shape as ContentFeedResponse. */
 export type SlideshowFeedResponse = ContentFeedResponse;
 
-/** Sort option for feed list: by upload date, view count, or free content only (0 credits). */
-export type FeedSort = "created_at" | "view_count" | "free";
+/** Sort option for feed list: upload date (newest/oldest), view count, or free-only lists. */
+export type FeedSort =
+  | "created_at"
+  | "created_at_asc"
+  | "view_count"
+  | "free"
+  | "free_asc";
 
-/** Resolve API sort param: when "free" we still order by created_at and pass free_only=1. */
-function feedSortToParams(sort: FeedSort): { sort: string; free_only?: string } {
-  if (sort === "free") return { sort: "created_at", free_only: "1" };
-  return { sort };
+/** Slideshow list does not filter free-only. */
+export type SlideshowFeedSort = "created_at" | "created_at_asc" | "view_count";
+
+type FeedSortParams = {
+  sort: string;
+  free_only?: string;
+  /** When true, request `order=asc` for date ordering (newest is default on the server). */
+  orderAsc?: boolean;
+};
+
+function feedSortToParams(sort: FeedSort): FeedSortParams {
+  switch (sort) {
+    case "free_asc":
+      return { sort: "created_at", free_only: "1", orderAsc: true };
+    case "free":
+      return { sort: "created_at", free_only: "1" };
+    case "created_at_asc":
+      return { sort: "created_at", orderAsc: true };
+    case "created_at":
+      return { sort: "created_at" };
+    case "view_count":
+      return { sort: "view_count" };
+    default:
+      return { sort: "created_at" };
+  }
+}
+
+function appendFeedSortToSearchParams(params: URLSearchParams, sort: FeedSort): void {
+  const { sort: sortParam, free_only: freeOnly, orderAsc } = feedSortToParams(sort);
+  params.set("sort", sortParam);
+  if (freeOnly) params.set("free_only", freeOnly);
+  if (orderAsc) params.set("order", "asc");
 }
 
 /** Fetch content feed by category. Optional auth (token sent when available). Dark requires can_view_nsfw or viewing_dark cookie/param. */
@@ -734,14 +767,12 @@ export async function fetchContentFeed(
   sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
-  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     category,
     cursor: String(cursor),
     limit: String(limit),
-    sort: sortParam,
   });
-  if (freeOnly) params.set("free_only", freeOnly);
+  appendFeedSortToSearchParams(params, sort);
   // Unauthenticated dark list: backend allows cookie or ?viewing= (encrypted viewing_dark token)
   if (category === "dark") {
     const viewing =
@@ -775,15 +806,15 @@ export async function fetchSlideshowFeed(
   category: "light" | "dark",
   cursor: number,
   limit = 10,
-  sort: Exclude<FeedSort, "free"> | "created_at" | "view_count" = "created_at"
+  sort: SlideshowFeedSort = "created_at"
 ): Promise<SlideshowFeedResponse> {
   const base = getApiBase();
   const params = new URLSearchParams({
     category,
     cursor: String(cursor),
     limit: String(limit),
-    sort,
   });
+  appendFeedSortToSearchParams(params, sort);
   // Unauthenticated dark list: backend allows cookie or ?viewing= (encrypted viewing_dark token)
   if (category === "dark") {
     const viewing =
@@ -820,14 +851,12 @@ export async function fetchContentFeedByTag(
   sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
-  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     tag: tag.trim(),
     cursor: String(cursor),
     limit: String(limit),
-    sort: sortParam,
   });
-  if (freeOnly) params.set("free_only", freeOnly);
+  appendFeedSortToSearchParams(params, sort);
   const headers: HeadersInit = {};
   const token = getAccessToken();
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
@@ -856,13 +885,11 @@ export async function fetchContentFeedSearch(
   sort: FeedSort = "created_at"
 ): Promise<ContentFeedResponse> {
   const base = getApiBase();
-  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     cursor: String(cursor),
     limit: String(limit),
-    sort: sortParam,
   });
-  if (freeOnly) params.set("free_only", freeOnly);
+  appendFeedSortToSearchParams(params, sort);
   if (q.trim()) params.set("q", q.trim());
   if (category) params.set("category", category);
   if (category === "dark") {
@@ -1054,14 +1081,12 @@ export async function fetchContentFeedServer(
 ): Promise<ContentFeedResponse> {
   const base = getServerApiBase();
   if (!base) return { items: [], next_cursor: 0, has_more: false };
-  const { sort: sortParam, free_only: freeOnly } = feedSortToParams(sort);
   const params = new URLSearchParams({
     category,
     cursor: String(cursor),
     limit: String(limit),
-    sort: sortParam,
   });
-  if (freeOnly) params.set("free_only", freeOnly);
+  appendFeedSortToSearchParams(params, sort);
   if (category === "dark" && viewingToken) params.set("viewing", viewingToken);
   const headers: HeadersInit = { "Content-Type": "application/json" };
   if (token) (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;

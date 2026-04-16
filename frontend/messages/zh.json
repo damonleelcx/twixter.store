@@ -82,7 +82,11 @@
     "sortBy": "排序",
     "sortByViewCount": "观看次数",
     "sortByUploadDate": "上传时间",
-    "sortByFree": "免费"
+    "sortByFree": "免费",
+    "sortOptionUploadNewest": "上传时间 · 最新在前",
+    "sortOptionUploadOldest": "上传时间 · 最旧在前",
+    "sortOptionFreeNewest": "仅免费 · 最新在前",
+    "sortOptionFreeOldest": "仅免费 · 最旧在前"
   },
   "compose": {
     "media": "媒体",
