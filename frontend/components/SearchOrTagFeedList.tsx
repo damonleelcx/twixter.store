@@ -9,6 +9,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContentCard } from "./ContentCard";
+import { FeedSortSelect } from "./FeedSortSelect";
 import { VirtualContentFeedList } from "./VirtualContentFeedList";
 
 const PAGE_SIZE = 20;
@@ -164,43 +165,9 @@ export function SearchOrTagFeedList(props: SearchOrTagFeedListProps) {
 
   return (
     <>
-      <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2">
-        <span className="text-sm text-[var(--muted)]">{tFeed("sortBy")}</span>
-        <div className="flex rounded-lg border border-[var(--border)] p-0.5">
-          <button
-            type="button"
-            onClick={() => setSort("created_at")}
-            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-              sort === "created_at"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            {tFeed("sortByUploadDate")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSort("view_count")}
-            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-              sort === "view_count"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            {tFeed("sortByViewCount")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSort("free")}
-            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-              sort === "free"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            {tFeed("sortByFree")}
-          </button>
-        </div>
+      <div className="flex min-w-0 items-center gap-2 border-b border-[var(--border)] px-4 py-2">
+        <span className="hidden shrink-0 text-sm text-[var(--muted)] sm:inline">{tFeed("sortBy")}</span>
+        <FeedSortSelect value={sort} onChange={setSort} className="w-full" />
       </div>
       <VirtualContentFeedList<ContentFeedItem>
         items={items}

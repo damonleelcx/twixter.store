@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { FeedSortSelect } from "./FeedSortSelect";
 
 type ComposeBoxProps = {
   sort: FeedSort;
@@ -34,46 +35,12 @@ export function ComposeBox({ sort, onSortChange }: ComposeBoxProps) {
   const canUpload = Boolean(user?.permissions?.includes("can_upload_content"));
 
   const sortRow = (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-      <div className="flex items-center gap-2 min-w-0 shrink-0">
-        <span className="text-sm text-[var(--muted)] shrink-0">{tFeed("sortBy")}</span>
-        <div className="flex rounded-lg border border-[var(--border)] p-0.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => onSortChange("created_at")}
-            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-              sort === "created_at"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            {tFeed("sortByUploadDate")}
-          </button>
-          <button
-            type="button"
-            onClick={() => onSortChange("view_count")}
-            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-              sort === "view_count"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            {tFeed("sortByViewCount")}
-          </button>
-          <button
-            type="button"
-            onClick={() => onSortChange("free")}
-            className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-              sort === "free"
-                ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
-                : "bg-[var(--background)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--foreground)]"
-            }`}
-          >
-            {tFeed("sortByFree")}
-          </button>
-        </div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="hidden shrink-0 text-sm text-[var(--muted)] sm:inline">{tFeed("sortBy")}</span>
+        <FeedSortSelect value={sort} onChange={onSortChange} />
       </div>
-      <div className="ml-auto flex items-center gap-2 shrink-0">
+      <div className="flex shrink-0 items-center justify-end gap-2 sm:ml-auto">
         <Link
           href={`/${locale}/slideshow`}
           className="rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--hover)]"

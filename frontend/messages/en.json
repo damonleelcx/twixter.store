@@ -82,7 +82,11 @@
     "sortBy": "Sort by",
     "sortByViewCount": "View count",
     "sortByUploadDate": "Upload date",
-    "sortByFree": "Free"
+    "sortByFree": "Free",
+    "sortOptionUploadNewest": "Upload · Newest first",
+    "sortOptionUploadOldest": "Upload · Oldest first",
+    "sortOptionFreeNewest": "Free only · Newest first",
+    "sortOptionFreeOldest": "Free only · Oldest first"
   },
   "compose": {
     "media": "Media",

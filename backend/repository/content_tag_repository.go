@@ -18,8 +18,8 @@ type ContentTagRepository interface {
 	RemoveTagFromContent(contentID, tagID uint) error
 	GetTagsByContentID(contentID uint) ([]entity.Tag, error)
 	GetContentsByTagID(tagID uint, limit, offset int) ([]entity.Content, error)
-	// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
-	GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
+	// GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）。createdAtDesc: 按上传时间排序时 true=新在前 false=旧在前
+	GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error)
 
 	// 批量操作
 	AddTagsToContent(contentID uint, tagIDs []uint) error
@@ -127,17 +127,20 @@ func (r *contentTagRepository) GetContentsByTagID(tagID uint, limit, offset int)
 }
 
 // orderByContentsClause 根据 sortBy 返回 contents 表的 ORDER 子句
-func orderByContentsClause(sortBy string) string {
+func orderByContentsClause(sortBy string, createdAtDesc bool) string {
 	switch sortBy {
 	case "view_count":
 		return "contents.view_count DESC"
 	default:
-		return "contents.created_at DESC"
+		if createdAtDesc {
+			return "contents.created_at DESC"
+		}
+		return "contents.created_at ASC"
 	}
 }
 
 // GetReadyContentsByTagID 获取该标签下 status=ready 的内容（用于 feed）；freeOnly 为 true 时仅返回 price=0 的免费内容
-func (r *contentTagRepository) GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
+func (r *contentTagRepository) GetReadyContentsByTagID(tagID uint, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Table("contents").
 		Joins("INNER JOIN content_tags ON contents.id = content_tags.content_id").
@@ -145,7 +148,7 @@ func (r *contentTagRepository) GetReadyContentsByTagID(tagID uint, limit, offset
 	if freeOnly {
 		query = query.Where("contents.price = ?", 0)
 	}
-	query = query.Limit(limit).Offset(offset).Order(orderByContentsClause(sortBy))
+	query = query.Limit(limit).Offset(offset).Order(orderByContentsClause(sortBy, createdAtDesc))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}

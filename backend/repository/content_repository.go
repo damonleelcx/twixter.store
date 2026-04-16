@@ -21,13 +21,13 @@ type ContentRepository interface {
 	GetByStatus(status entity.ContentStatus, limit, offset int) ([]entity.Content, error)
 	GetPublic(limit, offset int) ([]entity.Content, error)
 	GetByCategory(category string, limit, offset int) ([]entity.Content, error)
-	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
-	ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
-	// ListVideoFeedByCategory 按分类列出 feed 用视频内容（仅 type=video 且 status=ready）。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
-	ListVideoFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
+	// ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）。sortBy: "view_count" 或 "created_at"（默认）。createdAtDesc: 按上传时间排序时 true=新在前 false=旧在前；view_count 时忽略。freeOnly 为 true 时仅返回 price=0 的免费内容
+	ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error)
+	// ListVideoFeedByCategory 按分类列出 feed 用视频内容（仅 type=video 且 status=ready）。createdAtDesc 含义同 ListFeedByCategory
+	ListVideoFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error)
 	Search(keyword string, limit, offset int) ([]entity.Content, error)
-	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类。sortBy: "view_count" 或 "created_at"（默认）。freeOnly 为 true 时仅返回 price=0 的免费内容
-	SearchReady(keyword string, category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error)
+	// SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类。createdAtDesc 含义同 ListFeedByCategory
+	SearchReady(keyword string, category string, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error)
 
 	// 统计操作
 	Count() (int64, error)
@@ -135,24 +135,27 @@ func (r *contentRepository) GetByCategory(category string, limit, offset int) ([
 	return contents, nil
 }
 
-// orderByClause 根据 sortBy 返回 ORDER 子句；仅支持 view_count、created_at，默认 created_at DESC
-func orderByClause(sortBy string) string {
+// orderByClause 根据 sortBy 返回 ORDER 子句；仅支持 view_count、created_at；按上传时间时由 createdAtDesc 决定升降序
+func orderByClause(sortBy string, createdAtDesc bool) string {
 	switch sortBy {
 	case "view_count":
 		return "view_count DESC"
 	default:
-		return "created_at DESC"
+		if createdAtDesc {
+			return "created_at DESC"
+		}
+		return "created_at ASC"
 	}
 }
 
 // ListFeedByCategory 按分类列出 feed 用内容（仅 status=ready）；freeOnly 为 true 时仅返回 price=0 的免费内容
-func (r *contentRepository) ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
+func (r *contentRepository) ListFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("category = ? AND status = ?", category, entity.ContentStatusReady)
 	if freeOnly {
 		query = query.Where("price = ?", 0)
 	}
-	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy))
+	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy, createdAtDesc))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}
@@ -160,13 +163,13 @@ func (r *contentRepository) ListFeedByCategory(category string, limit, offset in
 }
 
 // ListVideoFeedByCategory 按分类列出 feed 用视频内容（仅 type=video 且 status=ready）；freeOnly 为 true 时仅返回 price=0 的免费内容
-func (r *contentRepository) ListVideoFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
+func (r *contentRepository) ListVideoFeedByCategory(category string, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("category = ? AND status = ? AND type = ?", category, entity.ContentStatusReady, entity.ContentTypeVideo)
 	if freeOnly {
 		query = query.Where("price = ?", 0)
 	}
-	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy))
+	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy, createdAtDesc))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}
@@ -185,7 +188,7 @@ func (r *contentRepository) Search(keyword string, limit, offset int) ([]entity.
 }
 
 // SearchReady 模糊搜索 name/description，仅 status=ready；category 为空时不限分类；freeOnly 为 true 时仅返回 price=0 的免费内容
-func (r *contentRepository) SearchReady(keyword string, category string, limit, offset int, sortBy string, freeOnly bool) ([]entity.Content, error) {
+func (r *contentRepository) SearchReady(keyword string, category string, limit, offset int, sortBy string, freeOnly bool, createdAtDesc bool) ([]entity.Content, error) {
 	var contents []entity.Content
 	query := r.db.Where("status = ?", entity.ContentStatusReady)
 	if keyword != "" {
@@ -197,7 +200,7 @@ func (r *contentRepository) SearchReady(keyword string, category string, limit, 
 	if freeOnly {
 		query = query.Where("price = ?", 0)
 	}
-	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy))
+	query = query.Limit(limit).Offset(offset).Order(orderByClause(sortBy, createdAtDesc))
 	if err := query.Find(&contents).Error; err != nil {
 		return nil, err
 	}
