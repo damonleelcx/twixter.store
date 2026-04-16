@@ -1030,16 +1030,24 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 		return
 	}
 
-	// 已购买或有效会员可观看视频流（light 与 dark 内容均适用，UserCanViewContent 不区分 category）
+	// 免费内容允许匿名播放；付费内容要求登录且拥有观看权限（已购买/有效会员/can_view_all）。
 	user, hasUser := middleware.GetUserFromContext(c)
-	if !hasUser {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	content, err := cc.contentService.GetContent(file.ContentID)
+	if err != nil || content == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Content not found"})
 		return
 	}
-	canView, err := cc.contentService.UserCanViewContent(user.ID, file.ContentID)
-	if err != nil || !canView {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
-		return
+	isFreeContent := content.Price <= 0
+	if !isFreeContent {
+		if !hasUser {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+		canView, err := cc.contentService.UserCanViewContent(user.ID, file.ContentID)
+		if err != nil || !canView {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
+			return
+		}
 	}
 
 	// 检查是否请求的是分片文件（.ts）
@@ -1068,8 +1076,8 @@ func (cc *ContentController) StreamTranscodedFile(c *gin.Context) {
 		return
 	}
 
-	// 请求的是 .m3u8 播放列表文件：记录观看（每次开始拉流时记一次，不记 .ts 分片请求）
-	if err := cc.contentService.RecordView(file.ContentID, user.ID); err == nil && middleware.GlobalCacheMiddleware != nil {
+	// 请求的是 .m3u8 播放列表文件：登录用户记录观看（每次开始拉流时记一次，不记 .ts 分片请求）
+	if hasUser && cc.contentService.RecordView(file.ContentID, user.ID) == nil && middleware.GlobalCacheMiddleware != nil {
 		middleware.GlobalCacheMiddleware.InvalidateContentCache(file.ContentID)
 	}
 
