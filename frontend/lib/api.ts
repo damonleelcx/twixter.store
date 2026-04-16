@@ -84,6 +84,12 @@ export function getAuthHeaders(): HeadersInit {
   return headers;
 }
 
+function hasClientAuthSession(): boolean {
+  if (typeof window === "undefined") return false;
+  if (getAccessToken() || getRefreshToken()) return true;
+  return document.cookie.split(";").some((part) => part.trim().startsWith(`${AUTH_TOKEN_COOKIE}=`));
+}
+
 /** Call refresh API and update stored access token. Throws on failure. */
 export async function authApiRefresh(): Promise<{ access_token: string; refresh_token?: string }> {
   const base = getApiBase();
@@ -572,6 +578,8 @@ export function getContentFilePreviewUrlSameOrigin(fileId: number): string {
 
 /** Report video duration from client (e.g. from video.duration). Backend only stores when DB has no duration. Requires auth. */
 export async function updateContentFileDuration(fileId: number, durationSeconds: number): Promise<void> {
+  // Anonymous playback is allowed for free content; skip duration PATCH when no auth session to avoid noisy 401s.
+  if (!hasClientAuthSession()) return;
   const base = getApiBase();
   const res = await fetchWithAuth(`${base}/content/files/${fileId}/duration`, {
     method: "PATCH",
