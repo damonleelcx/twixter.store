@@ -953,6 +953,8 @@ export async function recordWatchProgress(
   watchTimeSeconds: number,
   durationSeconds?: number
 ): Promise<void> {
+  // Anonymous playback is allowed for free content; skip watch-progress POST when no auth session.
+  if (!hasClientAuthSession()) return;
   const base = getApiBase();
   const body: { watch_time_seconds: number; duration_seconds?: number } = {
     watch_time_seconds: watchTimeSeconds,
