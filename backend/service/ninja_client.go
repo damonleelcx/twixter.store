@@ -132,6 +132,17 @@ func stringFromMessageContent(msg interface{}) (string, bool) {
 			return "", false
 		}
 		return out, true
+	case map[string]interface{}:
+		// NinjaChat 等网关有时把 assistant content 直接解析为 JSON 对象（如 {"title":"...","description":"..."}），而非字符串。
+		jb, err := json.Marshal(v)
+		if err != nil {
+			return "", false
+		}
+		s := strings.TrimSpace(string(jb))
+		if s == "" || s == "null" || s == "{}" {
+			return "", false
+		}
+		return s, true
 	default:
 		return "", false
 	}
